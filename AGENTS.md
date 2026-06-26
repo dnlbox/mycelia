@@ -255,8 +255,9 @@ Run these gates in order:
 - `setup` and `embed` are the only paths that may download the embedding model.
   Install, `find`, `serve`, and `connect` must not trigger model downloads or
   hidden corpus setup.
-- A formula carried in this source repo is for URL/local testing. A true
-  `brew install mycelia` journey requires a dedicated tap before promotion.
+- Interim distribution is `install.sh` via curl. The Homebrew target is
+  `homebrew/core`, not a personal tap. A Homebrew/core formula must build from a
+  tagged source archive and must not shell out to the curl installer.
 
 - Model source locations as byte ranges plus one-based line ranges.
 - Make identifiers deterministic. Do not use random identifiers for indexed data.

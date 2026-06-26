@@ -42,23 +42,31 @@ unavailable. The provider-less synchronous core API remains lexical by default.
 
 ## Install
 
-From the repository:
+Recommended install:
+
+```text
+curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/main/install.sh | sh
+```
+
+The script installs the tagged CLI with Cargo into `${MYCELIA_INSTALL_ROOT:-$HOME/.local}`.
+Override the version with `MYCELIA_REF`, for example:
+
+```text
+curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/main/install.sh | MYCELIA_REF=v0.1.1 sh
+```
+
+From a checkout:
 
 ```text
 cargo install --path crates/mycelia-cli --root "$HOME/.local"
 ```
 
-For a Homebrew-style build that uses the package manager's ONNX Runtime instead
-of downloading ORT binaries during the Rust build:
-
-```text
-brew install --HEAD https://raw.githubusercontent.com/dnlbox/mycelia/main/Formula/mycelia.rb
-```
-
-The formula builds with `--no-default-features --features semantic-system-ort`,
-depends on `onnxruntime`, and wraps the installed binary so users do not need to
-set `ORT_DYLIB_PATH`. The embedding model is still downloaded only by `setup` or
-`embed`, never by install, `find`, `serve`, or `connect`.
+The official Homebrew path is planned as a later `homebrew/core` submission. The
+Homebrew formula should build from a tagged source archive with
+`--no-default-features --features semantic-system-ort`, depend on `onnxruntime`,
+and avoid ORT binary downloads during the formula build. The embedding model is
+still downloaded only by `setup` or `embed`, never by install, `find`, `serve`,
+or `connect`.
 
 The repo's validation commands expect Cargo from the stable Rust toolchain path:
 

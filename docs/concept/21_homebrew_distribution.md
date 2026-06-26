@@ -48,46 +48,58 @@ Meaning:
 
 ## Packaging decisions
 
-### 1. Prefer a tap first
+### 1. Curl installer first, official Homebrew later
 
-Publish through a dedicated tap before attempting `homebrew/core`.
+Do not create a personal tap. The interim install path is a checked `install.sh`
+script fetched over curl. The final package-manager path is a direct
+`homebrew/core` submission once the project meets Homebrew's acceptance bar.
 
 Reasons:
 
-- A tap lets the project ship the gold path while the journey commands are still
-  settling.
-- `homebrew/core` adds notability, audit, and dependency-policy constraints that
-  are easier to satisfy after real use.
-- The formula can evolve quickly while `setup`, `connect`, `stats`, and `status`
-  stabilize.
+- A curl installer gives early users one command without introducing a temporary
+  tap identity that would later need to be retired.
+- `homebrew/core` should be the only Homebrew story, not a second-class tap.
+- The curl script can use the default developer build, while Homebrew/core can
+  use the stricter system-ORT build.
 
-Core remains a later goal, not the first distribution gate. This source repo now
-contains `Formula/mycelia.rb` so the formula can be tested and installed by URL,
-but a true `brew install mycelia` journey still wants a dedicated tap repository.
+Implemented first-cut installer:
+
+```text
+curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/main/install.sh | sh
+```
+
+The script requires Cargo and installs the tagged CLI from GitHub into
+`${MYCELIA_INSTALL_ROOT:-$HOME/.local}`. It is intentionally separate from the
+future Homebrew formula.
 
 ### 2. Build from source
 
-The formula should build the Rust CLI from a tagged source:
+The official Homebrew formula should build the Rust CLI from a stable tagged
+source archive with a SHA-256:
 
 ```ruby
 class Mycelia < Formula
   desc "Local, content-agnostic knowledge index for agent retrieval"
   homepage "https://github.com/dnlbox/mycelia"
-  url "https://github.com/dnlbox/mycelia.git", tag: "v0.1.0"
-  head "https://github.com/dnlbox/mycelia.git", branch: "main"
+  url "https://github.com/dnlbox/mycelia/archive/refs/tags/v0.1.1.tar.gz"
+  sha256 "<source archive sha256>"
   license "Apache-2.0"
 
   depends_on "rust" => :build
+  depends_on "onnxruntime"
 
   def install
-    system "cargo", "install", *std_cargo_args(path: "crates/mycelia-cli")
+    system "cargo", "install",
+      *std_cargo_args(path: "crates/mycelia-cli"),
+      "--no-default-features",
+      "--features", "semantic-system-ort"
   end
 end
 ```
 
 The release tag, `Cargo.toml` version, `Cargo.lock`, README, and LICENSE must
-agree before publishing. A future tap-only formula can switch to a source archive
-with a SHA-256 once the release process is split from the source repository.
+agree before submission. The formula must not shell out to the curl installer;
+Homebrew should build from source itself.
 
 ### 3. Do not use ORT build-time downloads in the Homebrew build
 
@@ -145,11 +157,11 @@ Acceptable implementation options:
 - Use a small launcher script that sets only the required runtime library path
   and then execs the real binary.
 
-Implemented: both the formula wrapper and the `semantic-system-ort` CLI runtime
-lookup are present. The wrapper sets `ORT_DYLIB_PATH` to Homebrew's
-`onnxruntime` dylib while preserving a user override. The CLI also scans
+Implemented: the `semantic-system-ort` CLI runtime lookup scans
 `HOMEBREW_PREFIX`, `/opt/homebrew`, and `/usr/local` for the Homebrew
-`onnxruntime` library before initializing FastEmbed.
+`onnxruntime` library before initializing FastEmbed. A Homebrew/core formula can
+still add a wrapper if audit or runtime testing proves the direct lookup is not
+enough.
 
 The acceptance test is simple: after `brew install mycelia`, `mycelia setup`
 can load ONNX Runtime without manual shell configuration.
@@ -204,16 +216,15 @@ SQLite-backed index path without downloading embeddings.
 
 ## Release checklist
 
-Before the first tap release:
+Before Homebrew/core submission:
 
 1. Implement the `semantic-system-ort` build mode. (Done.)
 2. Verify the installed binary finds Homebrew `onnxruntime` without user env vars.
 3. Keep `setup` as the first model-download and embed path. (Done.)
-4. Add or update README install instructions. (Done for source-repo formula.)
-5. Tag the release.
-6. Move or copy `Formula/mycelia.rb` to a dedicated tap before claiming
-   `brew install mycelia`.
-7. Run:
+4. Add or update README install instructions. (Done for curl installer.)
+5. Tag the release and compute the source archive SHA-256.
+6. Draft the Homebrew/core formula outside this source tree.
+7. Run the formula gates in a Homebrew checkout:
 
 ```text
 brew install --build-from-source ./Formula/mycelia.rb

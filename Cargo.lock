@@ -1326,7 +1326,7 @@ dependencies = [
 
 [[package]]
 name = "mycelia-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "fastembed",
@@ -1342,7 +1342,7 @@ dependencies = [
 
 [[package]]
 name = "mycelia-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blake3",
  "ignore",

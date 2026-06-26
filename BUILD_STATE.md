@@ -5,8 +5,8 @@ Agent working area. A fresh session reads this top to bottom, then follows
 
 ## Now
 
-- Milestone: slice `21` Homebrew distribution readiness SHIPPED. AGENTS.md and
-  concept `21` are reconciled.
+- Milestone: slice `21` distribution readiness SHIPPED. AGENTS.md and concept
+  `21` are reconciled to curl-first plus official Homebrew/core later.
 - Implemented: Cargo feature split. Default builds use `semantic-download`;
   Homebrew/system builds use `--no-default-features --features
   semantic-system-ort` with FastEmbed dynamic ORT loading and a direct `ort`
@@ -15,12 +15,11 @@ Agent working area. A fresh session reads this top to bottom, then follows
   `ORT_DYLIB_PATH` from Homebrew `onnxruntime`, and the CLI scans
   `HOMEBREW_PREFIX`, `/opt/homebrew`, and `/usr/local` when built for
   `semantic-system-ort`.
-- Implemented: source-repo `Formula/mycelia.rb`, README install notes, and doc
-  scrub of local absolute paths and credential-source details.
+- Implemented: `install.sh` curl installer, README install notes, and doc scrub
+  of local absolute paths and credential-source details.
 - Validation: fmt, clippy, 90 tests, default release build, system-ORT release
-  build, Ruby syntax, `brew style`, and lexical fixture smoke pass. `brew audit`
-  by path is disabled in this Homebrew version; full audit by formula name waits
-  for a tap.
+  build, shell syntax, and lexical fixture smoke pass. Homebrew/core formula
+  audit waits for the separate formula submission.
 - Corpus: refreshed `forge` is 12,386 chunks, 12,386 embeddings, model
   `fastembed-5.17.2:BAAI/bge-small-en-v1.5`, db size 50.6 MB.
 - Eval (68-case, refreshed Forge): routed default 52/68 @ 1413.7 tokens/answer.
@@ -127,17 +126,16 @@ Agent working area. A fresh session reads this top to bottom, then follows
 - 2026-06-26: License Mycelia under Apache-2.0 rather than MIT. The project is
   intended to be permissive FOSS and embeddable in agent tools, and Apache-2.0's
   explicit patent grant is the better default for that path.
-- 2026-06-26: Treat the source-repo Homebrew formula as URL/local-testable
-  distribution scaffolding, not a real tap. A plain `brew install mycelia` path
-  should wait for a dedicated tap repository; the source repo can still publish a
-  clean `main` and tag for formula testing.
+- 2026-06-26: Do not create a personal Homebrew tap. Ship curl install first,
+  then submit directly to Homebrew/core once acceptance constraints are met. The
+  Homebrew/core formula must build from a tagged source archive and must not use
+  the curl installer.
 
 ## Session log
 
-- 2026-06-26: Slice 21 complete; split semantic builds into download vs
-  system-ORT modes, added a source-repo formula and runtime ORT lookup, scrubbed
-  publish-sensitive paths from current docs, refreshed Forge, and verified 90
-  tests plus the 68-case routed gate (52/68).
+- 2026-06-26: Distribution plan corrected per user direction: no tap, no
+  source-repo formula; added curl installer, kept system-ORT feature split for
+  future Homebrew/core, and bumped the public release target to v0.1.1.
 - 2026-06-26: Refreshed README to current shipped behavior and changed the repo
   license from MIT metadata-only to Apache-2.0 with a top-level license file.
 - 2026-06-26: Slice 19 complete; shipped logs, stats/status, path-aware journey
