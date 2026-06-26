@@ -81,7 +81,7 @@ source archive with a SHA-256:
 class Mycelia < Formula
   desc "Local, content-agnostic knowledge index for agent retrieval"
   homepage "https://github.com/dnlbox/mycelia"
-  url "https://github.com/dnlbox/mycelia/archive/refs/tags/v0.1.1.tar.gz"
+  url "https://github.com/dnlbox/mycelia/archive/refs/tags/v0.1.2.tar.gz"
   sha256 "<source archive sha256>"
   license "Apache-2.0"
 

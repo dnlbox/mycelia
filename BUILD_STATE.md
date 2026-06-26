@@ -135,7 +135,8 @@ Agent working area. A fresh session reads this top to bottom, then follows
 
 - 2026-06-26: Distribution plan corrected per user direction: no tap, no
   source-repo formula; added curl installer, kept system-ORT feature split for
-  future Homebrew/core, and bumped the public release target to v0.1.1.
+  future Homebrew/core, and bumped the public release target to v0.1.2 after the
+  remote installer smoke caught the broken v0.1.1 Cargo syntax.
 - 2026-06-26: Refreshed README to current shipped behavior and changed the repo
   license from MIT metadata-only to Apache-2.0 with a top-level license file.
 - 2026-06-26: Slice 19 complete; shipped logs, stats/status, path-aware journey

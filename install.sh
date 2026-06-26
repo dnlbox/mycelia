@@ -2,7 +2,7 @@
 set -eu
 
 repo="${MYCELIA_REPO:-https://github.com/dnlbox/mycelia.git}"
-ref="${MYCELIA_REF:-v0.1.1}"
+ref="${MYCELIA_REF:-v0.1.2}"
 ref_type="${MYCELIA_REF_TYPE:-tag}"
 root="${MYCELIA_INSTALL_ROOT:-$HOME/.local}"
 profile="${MYCELIA_CARGO_PROFILE:-release}"
@@ -37,9 +37,9 @@ echo "Installing mycelia from $repo ($ref_type $ref) into $root"
 
 # shellcheck disable=SC2086
 cargo install \
+  mycelia-cli \
   --git "$repo" \
   "--$ref_type" "$ref" \
-  --package mycelia-cli \
   --root "$root" \
   --locked \
   $profile_args
