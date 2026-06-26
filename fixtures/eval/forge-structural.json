@@ -1,0 +1,85 @@
+{
+  "limit": 5,
+  "cases": [
+    {
+      "name": "exact symbol chunk_record_from_row",
+      "query": "chunk_record_from_row ChunkRecord rusqlite Row",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn chunk_record_from_row"
+        }
+      ]
+    },
+    {
+      "name": "exact symbol find_fts5_reranked",
+      "query": "find_fts5_reranked bm25 phrase coverage tokenize",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn find_fts5_reranked"
+        }
+      ]
+    },
+    {
+      "name": "exact symbol IndexReport",
+      "query": "IndexReport discovered indexed chunks_written rejected",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/model.rs",
+          "contains": "struct IndexReport"
+        }
+      ]
+    },
+    {
+      "name": "exact symbol apply_migrations",
+      "query": "apply_migrations user_version LATEST_SCHEMA_VERSION MIGRATION",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn apply_migrations"
+        }
+      ]
+    },
+    {
+      "name": "intent map database row to chunk record",
+      "query": "function that reads a row from rusqlite and returns a ChunkRecord with span and extractor",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn chunk_record_from_row"
+        }
+      ]
+    },
+    {
+      "name": "intent score fts5 candidates by phrase and coverage",
+      "query": "rerank FTS5 candidates using exact phrase match and term coverage ratio alongside BM25",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn find_fts5_reranked"
+        }
+      ]
+    },
+    {
+      "name": "intent split oversized text chunk",
+      "query": "split a byte range at whitespace when it exceeds the maximum chunk size",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/extract.rs",
+          "contains": "fn split_range"
+        }
+      ]
+    },
+    {
+      "name": "intent dispatch extractor by file type",
+      "query": "return the extractor identifier for a source path based on its file extension",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/extract.rs",
+          "contains": "fn extractor_id_for"
+        }
+      ]
+    }
+  ]
+}

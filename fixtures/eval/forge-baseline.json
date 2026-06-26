@@ -1,0 +1,405 @@
+{
+  "limit": 5,
+  "cases": [
+    {
+      "name": "subscription boundary",
+      "query": "subscription-first",
+      "expected": [
+        {
+          "source_path": "docs/concept/00_vision.md",
+          "contains": "Subscription-first"
+        }
+      ]
+    },
+    {
+      "name": "context rather than transport",
+      "query": "Unify the context",
+      "expected": [
+        {
+          "source_path": "docs/concept/00_vision.md",
+          "contains": "Unify the"
+        }
+      ]
+    },
+    {
+      "name": "tier vocabulary",
+      "query": "deep standard fast explore",
+      "expected": [
+        {
+          "source_path": "docs/concept/02_architecture.md",
+          "contains": "deep"
+        }
+      ]
+    },
+    {
+      "name": "client employer exclusion",
+      "query": "Never indexes ~/Code/",
+      "expected": [
+        {
+          "source_path": "docs/concept/02_architecture.md",
+          "contains": "Never indexes"
+        }
+      ]
+    },
+    {
+      "name": "graphify embedding distinction",
+      "query": "graphify uses none",
+      "expected": [
+        {
+          "source_path": "docs/concept/01_research.md",
+          "contains": "no embeddings"
+        }
+      ]
+    },
+    {
+      "name": "range addressed chunks",
+      "query": "range-addressable chunk",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/01_architecture.md",
+          "contains": "range-addressable"
+        }
+      ]
+    },
+    {
+      "name": "cross corpus research",
+      "query": "discovery jurisprudence",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/00_vision.md",
+          "contains": "discovery"
+        }
+      ]
+    },
+    {
+      "name": "affected set incremental",
+      "query": "Affected-set incremental",
+      "expected": [
+        {
+          "source_path": "docs/concept/01_research.md",
+          "contains": "Affected-set"
+        }
+      ]
+    },
+    {
+      "name": "forward only migrations",
+      "query": "forward-only migrations",
+      "expected": [
+        {
+          "source_path": "bifrost/docs/concept/01_architecture.md",
+          "contains": "forward-only"
+        }
+      ]
+    },
+    {
+      "name": "gateway owns keys",
+      "query": "Keys live here never in the harness",
+      "expected": [
+        {
+          "source_path": "docs/concept/02_architecture.md",
+          "contains": "Keys live"
+        }
+      ]
+    },
+    {
+      "name": "official subscription client",
+      "query": "official subscription client",
+      "expected": [
+        {
+          "source_path": "docs/concept/02_architecture.md",
+          "contains": "official subscription client"
+        }
+      ]
+    },
+    {
+      "name": "one database per corpus",
+      "query": "One database belongs to one canonical corpus root",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/02_first_milestone.md",
+          "contains": "One database"
+        }
+      ]
+    },
+    {
+      "name": "stale rejection behavior",
+      "query": "rejected changed source",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/02_first_milestone.md",
+          "contains": "rejected changed source"
+        }
+      ]
+    },
+    {
+      "name": "exact provenance",
+      "query": "exact provenance",
+      "expected": [
+        {
+          "source_path": "mycelia/fixtures/smoke/v2/architecture.md",
+          "contains": "exact provenance"
+        }
+      ]
+    },
+    {
+      "name": "mean reciprocal rank definition",
+      "query": "Mean reciprocal rank",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/03_retrieval_evaluation.md",
+          "contains": "Mean reciprocal rank"
+        }
+      ]
+    },
+    {
+      "name": "hit rate definition",
+      "query": "Hit rate at limit",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/03_retrieval_evaluation.md",
+          "contains": "Hit rate at limit"
+        }
+      ]
+    },
+    {
+      "name": "graph by default",
+      "query": "Graph by default",
+      "expected": [
+        {
+          "source_path": "sleipnir/README.md",
+          "contains": "Graph by default"
+        }
+      ]
+    },
+    {
+      "name": "sudden death continuity",
+      "query": "engineered for sudden death",
+      "expected": [
+        {
+          "source_path": "sleipnir/README.md",
+          "contains": "sudden death"
+        }
+      ]
+    },
+    {
+      "name": "tauri harness",
+      "query": "Tauri Rust core web UI",
+      "expected": [
+        {
+          "source_path": "sleipnir/README.md",
+          "contains": "Tauri"
+        }
+      ]
+    },
+    {
+      "name": "ambiguous content agnostic query",
+      "query": "content-agnostic",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/00_vision.md",
+          "contains": "content-agnostic"
+        }
+      ]
+    },
+    {
+      "name": "code symbol find with strategy",
+      "query": "find_with_strategy",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/lib.rs",
+          "contains": "pub fn find_with_strategy"
+        }
+      ]
+    },
+    {
+      "name": "code symbol chunk identifier",
+      "query": "chunk_id source_hash byte_start byte_end",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/extract.rs",
+          "contains": "fn chunk_id"
+        }
+      ]
+    },
+    {
+      "name": "code symbol safe fts query",
+      "query": "fts5_query unique tokens",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn fts5_query"
+        }
+      ]
+    },
+    {
+      "name": "code symbol token sequence",
+      "query": "contains_token_sequence",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn contains_token_sequence"
+        }
+      ]
+    },
+    {
+      "name": "code symbol migrations",
+      "query": "apply_migrations connection",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn apply_migrations"
+        }
+      ]
+    },
+    {
+      "name": "code symbol canonical path",
+      "query": "canonical_relative_path",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn canonical_relative_path"
+        }
+      ]
+    },
+    {
+      "name": "code symbol evaluation error",
+      "query": "EvaluationCaseWithoutExpected",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/error.rs",
+          "contains": "EvaluationCaseWithoutExpected"
+        }
+      ]
+    },
+    {
+      "name": "code symbol clap normalization",
+      "query": "normalize_clap_error",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-cli/src/main.rs",
+          "contains": "fn normalize_clap_error"
+        }
+      ]
+    },
+    {
+      "name": "code test retrieve provenance",
+      "query": "retrieve_returns_exact_chunk_with_provenance",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn retrieve_returns_exact_chunk_with_provenance"
+        }
+      ]
+    },
+    {
+      "name": "code test migration backfill",
+      "query": "migration_two_backfills_existing_chunks",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn migration_two_backfills_existing_chunks"
+        }
+      ]
+    },
+    {
+      "name": "ambiguous workspace contract",
+      "query": "workspace child contract",
+      "expected": [
+        {
+          "source_path": "ai-protocol/README.md",
+          "contains": "nearest `AGENTS.md`"
+        }
+      ]
+    },
+    {
+      "name": "ambiguous provider boundary",
+      "query": "provider credential boundary",
+      "expected": [
+        {
+          "source_path": "bifrost/docs/_legacy/07_decisions_and_open_questions.md",
+          "contains": "provider-credential boundary"
+        }
+      ]
+    },
+    {
+      "name": "ambiguous deterministic routing",
+      "query": "deterministic routing",
+      "expected": [
+        {
+          "source_path": "bifrost/docs/_legacy/07_decisions_and_open_questions.md",
+          "contains": "Start with deterministic routing"
+        }
+      ]
+    },
+    {
+      "name": "ambiguous local owned index",
+      "query": "local owned index",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/00_vision.md",
+          "contains": "Local + owned"
+        }
+      ]
+    },
+    {
+      "name": "ambiguous source path model",
+      "query": "source_path String",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/model.rs",
+          "contains": "pub source_path: String"
+        }
+      ]
+    },
+    {
+      "name": "hard query changed source transaction",
+      "query": "changed file replaces prior chunks atomically",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "changed_file_replaces_prior_chunks_atomically"
+        }
+      ]
+    },
+    {
+      "name": "hard query punctuation escaping",
+      "query": "escape punctuation for a safe full text query",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn fts5_query"
+        }
+      ]
+    },
+    {
+      "name": "hard query sqlite row mapping",
+      "query": "map SQLite row into chunk record",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn chunk_record_from_row"
+        }
+      ]
+    },
+    {
+      "name": "hard query source identity hash",
+      "query": "combine source identity content hash and byte offsets",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/extract.rs",
+          "contains": "fn chunk_id"
+        }
+      ]
+    },
+    {
+      "name": "hard query cli error prefix",
+      "query": "remove the clap error prefix",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-cli/src/main.rs",
+          "contains": "strip_prefix"
+        }
+      ]
+    }
+  ]
+}

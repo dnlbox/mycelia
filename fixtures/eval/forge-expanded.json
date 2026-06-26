@@ -1,0 +1,131 @@
+{
+  "limit": 5,
+  "cases": [
+    {
+      "name": "mycelia exact chunk_record_from_row",
+      "query": "chunk_record_from_row ChunkRecord rusqlite Row",
+      "expected": [
+        { "source_path": "mycelia/crates/mycelia-core/src/store.rs", "contains": "fn chunk_record_from_row" }
+      ]
+    },
+    {
+      "name": "mycelia exact find_fts5_reranked",
+      "query": "find_fts5_reranked bm25 phrase coverage tokenize",
+      "expected": [
+        { "source_path": "mycelia/crates/mycelia-core/src/store.rs", "contains": "fn find_fts5_reranked" }
+      ]
+    },
+    {
+      "name": "mycelia intent dispatch extractor by file type",
+      "query": "return the extractor identifier for a source path based on its file extension",
+      "expected": [
+        { "source_path": "mycelia/crates/mycelia-core/src/extract.rs", "contains": "fn extractor_id_for" }
+      ]
+    },
+    {
+      "name": "bifrost exact set_budget",
+      "query": "Budget set_budget api_key_name storage",
+      "expected": [
+        { "source_path": "bifrost/crates/bifrost-core/src/storage.rs", "contains": "fn set_budget" }
+      ]
+    },
+    {
+      "name": "bifrost intent resolve tier target",
+      "query": "look up the configured provider target for a requested routing tier",
+      "expected": [
+        { "source_path": "bifrost/crates/bifrost-core/src/config.rs", "contains": "fn resolve" }
+      ]
+    },
+    {
+      "name": "operio exact OperioBrain",
+      "query": "OperioBrain reasoning loop work order mcp manager",
+      "expected": [
+        { "source_path": "operio-agent/agents/operio_agent/core/brain.py", "contains": "class OperioBrain" }
+      ]
+    },
+    {
+      "name": "operio intent create work order",
+      "query": "async method that creates a maintenance work order for a piece of equipment",
+      "expected": [
+        { "source_path": "operio-agent/agents/operio_agent/core/brain.py", "contains": "async def create_work_order" }
+      ]
+    },
+    {
+      "name": "operio intent approve ticket route",
+      "query": "API route handler that approves a pending maintenance ticket",
+      "expected": [
+        { "source_path": "operio-agent/agents/operio_agent/api/routes/tickets.py", "contains": "def approve_ticket" }
+      ]
+    },
+    {
+      "name": "operio exact run_scenario_benchmark",
+      "query": "run_scenario_benchmark ScenarioRunResult BenchmarkRunResult eval runner",
+      "expected": [
+        { "source_path": "operio-agent/agents/operio_agent/evals/runner.py", "contains": "async def run_scenario_benchmark" }
+      ]
+    },
+    {
+      "name": "operio intent tenant lease context for chat",
+      "query": "build the tenant and lease context string before answering a chat message",
+      "expected": [
+        { "source_path": "operio-agent/agents/operio_agent/api/routes/chat.py", "contains": "def get_tenant_lease_context" }
+      ]
+    },
+    {
+      "name": "candelabrum exact RunExecutor",
+      "query": "RunExecutor StartExecutionResult start execution",
+      "expected": [
+        { "source_path": "candelabrum-studio/src/core/executor.ts", "contains": "export class RunExecutor" }
+      ]
+    },
+    {
+      "name": "candelabrum intent advance run pipeline",
+      "query": "advance a run to the next stage in the generation pipeline",
+      "expected": [
+        { "source_path": "candelabrum-studio/src/core/orchestrator.ts", "contains": "export async function advance" }
+      ]
+    },
+    {
+      "name": "candelabrum intent fal image provider",
+      "query": "provider that generates images through the fal backend",
+      "expected": [
+        { "source_path": "candelabrum-studio/src/providers/image/fal.ts", "contains": "export class FalImageProvider" }
+      ]
+    },
+    {
+      "name": "candelabrum exact RunStore",
+      "query": "RunStore persist runs storage state",
+      "expected": [
+        { "source_path": "candelabrum-studio/src/core/store.ts", "contains": "export class RunStore" }
+      ]
+    },
+    {
+      "name": "candelabrum intent approve run at gate",
+      "query": "approve a run that is waiting for human approval at a gate",
+      "expected": [
+        { "source_path": "candelabrum-studio/src/core/orchestrator.ts", "contains": "export async function approve" }
+      ]
+    },
+    {
+      "name": "ai-protocol doc blueprint vision",
+      "query": "self-organizing agentic workspace project blueprint vision",
+      "expected": [
+        { "source_path": "ai-protocol/docs/concept/00_blueprint.md", "contains": "Self-Organizing Agentic Workspace" }
+      ]
+    },
+    {
+      "name": "ai-protocol doc agnostic tooling convention",
+      "query": "convention for keeping tooling agnostic across different AI coding assistants",
+      "expected": [
+        { "source_path": "ai-protocol/AGENTS.md", "contains": "Agnostic tooling convention" }
+      ]
+    },
+    {
+      "name": "ai-protocol doc session continuity",
+      "query": "how an agent resumes work and continues a session across context resets",
+      "expected": [
+        { "source_path": "ai-protocol/AGENTS.md", "contains": "Session continuity protocol" }
+      ]
+    }
+  ]
+}

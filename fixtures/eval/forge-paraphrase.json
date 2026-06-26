@@ -1,0 +1,105 @@
+{
+  "limit": 5,
+  "cases": [
+    {
+      "name": "consult distilled knowledge",
+      "query": "ask an index for a distilled answer instead of scanning source files",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/00_vision.md",
+          "contains": "memory you consult"
+        }
+      ]
+    },
+    {
+      "name": "precision rejects false relationships",
+      "query": "an incorrect relationship is more harmful than leaving one absent",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/00_vision.md",
+          "contains": "wrong connection is worse than none"
+        }
+      ]
+    },
+    {
+      "name": "private vendor independent memory",
+      "query": "keep sensitive project knowledge on this machine without depending on a vendor",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/00_vision.md",
+          "contains": "Local + owned"
+        }
+      ]
+    },
+    {
+      "name": "borrow structural parsers",
+      "query": "reuse a parser to identify functions calls and imports rather than writing one",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/01_architecture.md",
+          "contains": "tree-sitter for code"
+        }
+      ]
+    },
+    {
+      "name": "model change targeted vectors",
+      "query": "switching representation models should recompute only the necessary vectors",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/01_architecture.md",
+          "contains": "targeted re-embed"
+        }
+      ]
+    },
+    {
+      "name": "stdio tool cannot switch indexes",
+      "query": "a tool request must not choose a different index file than the server started with",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/06_stdio_mcp.md",
+          "contains": "arbitrary database"
+        }
+      ]
+    },
+    {
+      "name": "changed unreadable source removes old results",
+      "query": "if an edited document becomes unreadable do not continue serving its previous text",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/02_first_milestone.md",
+          "contains": "loses its old chunks"
+        }
+      ]
+    },
+    {
+      "name": "stable corpus nickname derives storage",
+      "query": "clients use a stable corpus nickname while the database location is computed locally",
+      "expected": [
+        {
+          "source_path": "mycelia/docs/concept/07_named_corpus_profiles.md",
+          "contains": "database path is derived"
+        }
+      ]
+    },
+    {
+      "name": "nearest parent agent contract",
+      "query": "which parent folder instructions govern work inside a nested repository",
+      "expected": [
+        {
+          "source_path": "ai-protocol/README.md",
+          "contains": "nearest `AGENTS.md`"
+        }
+      ]
+    },
+    {
+      "name": "convert database row to domain chunk",
+      "query": "translate a SQLite result record into the in-memory sourced chunk structure",
+      "expected": [
+        {
+          "source_path": "mycelia/crates/mycelia-core/src/store.rs",
+          "contains": "fn chunk_record_from_row"
+        }
+      ]
+    }
+  ]
+}

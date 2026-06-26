@@ -1,0 +1,1 @@
+ALTER TABLE sources ADD COLUMN extractor TEXT NOT NULL DEFAULT '';
