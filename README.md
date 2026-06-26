@@ -45,14 +45,14 @@ unavailable. The provider-less synchronous core API remains lexical by default.
 Recommended install:
 
 ```text
-curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.3/install.sh | sh
 ```
 
 The script installs the tagged CLI with Cargo into `${MYCELIA_INSTALL_ROOT:-$HOME/.local}`.
 Override the version with `MYCELIA_REF`, for example:
 
 ```text
-curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/main/install.sh | MYCELIA_REF=v0.1.2 sh
+curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.3/install.sh | MYCELIA_REF=v0.1.3 sh
 ```
 
 From a checkout:

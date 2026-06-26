@@ -65,7 +65,7 @@ Reasons:
 Implemented first-cut installer:
 
 ```text
-curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.3/install.sh | sh
 ```
 
 The script requires Cargo and installs the tagged CLI from GitHub into
@@ -81,7 +81,7 @@ source archive with a SHA-256:
 class Mycelia < Formula
   desc "Local, content-agnostic knowledge index for agent retrieval"
   homepage "https://github.com/dnlbox/mycelia"
-  url "https://github.com/dnlbox/mycelia/archive/refs/tags/v0.1.2.tar.gz"
+  url "https://github.com/dnlbox/mycelia/archive/refs/tags/v0.1.3.tar.gz"
   sha256 "<source archive sha256>"
   license "Apache-2.0"
 
