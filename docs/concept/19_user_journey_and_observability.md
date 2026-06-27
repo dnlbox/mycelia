@@ -228,15 +228,19 @@ Slice `19` then shipped:
 Validation on the release binary:
 
 - `setup` registered, indexed, and embedded a temporary fixture corpus.
-- `connect codex` wrote an isolated `[mcp_servers.mycelia-<name>]` entry with an
-  absolute binary path and stayed idempotent.
-- A real stdio MCP exchange initialized the server, listed `find` and
-  `retrieve`, called `find` against a temporary corpus, closed cleanly, and
-  wrote `serve start` plus `find` lines to the corpus log.
+- `connect codex` now writes one isolated `[mcp_servers.mycelia]` entry with an
+  absolute binary path and `--corpus <default>` fallback, removes legacy
+  per-corpus `mycelia-<name>` entries, and stays idempotent.
+- A real stdio MCP exchange initialized the multi-corpus server, listed `find`,
+  `search_codebase`, `locate_implementation`, `retrieve`, and `list_corpora`,
+  called default-cwd `find`, explicit cross-corpus `find`, and namespaced
+  `retrieve` against temporary corpora, closed cleanly, and wrote `serve start`
+  plus per-corpus activity lines to the corpus logs.
 - `stats` aggregated the logged query.
 - Refreshed `forge`: 12,357 chunks, 12,357 embeddings, 50.4 MB database.
-- Current 68-case gate on refreshed `forge`: routed 52/68 at 1413.0 tokens per
-  answer, fts5-reranked 48/68 at 1450.7 tokens per answer.
+- Current 68-case gate on refreshed `forge` after the multi-corpus server slice:
+  routed 47/68 on the current tree. This is below the prior 52/68 checkpoint and
+  is recorded in `BUILD_STATE.md` as a follow-up diagnostic slice.
 
 ## Deferred
 

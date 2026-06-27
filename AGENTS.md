@@ -75,17 +75,19 @@ and hand-editable. Everything above is generic baseline; do not hand-edit it. --
 implemented baseline is deterministic discovery, range-addressed UTF-8 chunks,
 content-hash freshness, SQLite persistence, deterministic FTS5 reranking, raw
 FTS5/BM25 and substring reference adapters, and manifest-driven retrieval
-evaluation through a CLI. A read-only stdio MCP server exposes `find` and
-`retrieve` against one explicitly configured database. Named corpus profiles map
+evaluation through a CLI. A read-only stdio MCP server exposes `find`, `retrieve`,
+`search_codebase`, `locate_implementation`, and `list_corpora` against registered
+local corpus profiles, resolving the corpus per request while preserving explicit
+`--database` mode for fixtures and diagnostics. Named corpus profiles map
 stable client-facing names to canonical roots and derived local database paths. A
 measured local embedding adapter provides brute-force vector and lexical-spine
 hybrid reference strategies. Query-class routing (`docs/concept/13`) is the CLI
 default once a corpus is embedded, selecting a lexical-first blend for symbol
 lookups and a semantic blend for prose; it falls back to reranked FTS5 when a
 corpus has no embeddings, while reranked FTS5 stays the default for the
-provider-less sync API. The stdio MCP server also routes by default, loading the
-local embedding model once at startup behind a shared provider; `serve --lexical`
-or a model-load failure degrades it to reranked FTS5 (`18`). The reranker rewards
+provider-less sync API. The stdio MCP server also routes by default behind a
+shared lazy provider; `serve --lexical` or a model-load failure degrades it to
+reranked FTS5 (`18`, `22`). The reranker rewards
 signature-line coverage for identifier-shaped query terms so symbol definitions
 outrank references (`17`). Code-aware tree-sitter
 chunking (`docs/concept/09`), a distilled two-stage MCP surface measured in tokens
@@ -136,11 +138,12 @@ Run these gates in order:
   remains synchronous and protocol-independent.
 - In stdio MCP mode, reserve stdout exclusively for protocol messages. Diagnostics
   may use stderr.
-- Bind an MCP server process to one database selected at launch; tool arguments
-  must not accept arbitrary database paths.
+- Bind an MCP server process to the local registered corpus profile store, or to
+  one explicit database only in diagnostic `--database` mode. Tool arguments may
+  select registered corpus names, but must never accept arbitrary database paths.
 - Keep the MCP tool surface read-only until mutation capabilities and consent are
   explicitly designed: no model-facing mutation tools, no arbitrary database
-  paths. The server may still self-heal its own launch-bound index as internal
+  paths. The server may still self-heal the resolved corpus index as internal
   maintenance (re-index or prune a drifted file detected on `retrieve`); this is
   not a tool the model invokes and does not relax the surface.
 - Store named corpus roots in local profile files and derive profile database

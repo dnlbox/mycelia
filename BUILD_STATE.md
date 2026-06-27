@@ -5,26 +5,28 @@ Agent working area. A fresh session reads this top to bottom, then follows
 
 ## Now
 
-- Latest slice: MCP adoption surface now explains Mycelia as the
-  token-efficient orientation path, exposes `search_codebase` and
-  `locate_implementation` aliases over the same read-only find path, and adds
-  `stats --recent N` for quick adoption checks.
-- NEXT SLICE (start here): single multi-corpus MCP server. Spec is authored and
-  decided in `docs/concept/22_multi_corpus_server.md`; not yet implemented. Read
-  `22` in full, then work its "Migration, mapped to files" list in order:
-  1) `MyceliaServer` (`crates/mycelia-cli/src/mcp.rs`) from one bound database to
-  a lazy per-corpus registry + per-request resolver calling `infer_from_cwd`
-  (`crates/mycelia-cli/src/profile.rs`, already exists); 2) tool handlers add
-  optional `corpus` + the resolution ladder + `corpus:hash` ids; 3) `--corpus`
-  becomes the default/fallback, not the sole binding; 4) new `list_corpora`;
-  5) `connect` writes one entry; 6) extend the MCP stdio test. Driver and evidence
-  in `22` ("Evidence: deferral, not naming"): per-corpus servers expose 4xN tools
-  that trip harness tool-search deferral and hide Mycelia. Reconcile AGENTS.md
-  Project Specifics only once implemented (per `prompt.md`), not from the spec.
-  Validation gate: fmt, clippy, MCP stdio test, CLI + workspace tests; keep the
-  68-case Forge gate steady (routed 52/68).
-- Validation: fmt, clippy, focused MCP stdio test, CLI crate tests, and full
-  workspace tests pass.
+- Latest slice: single multi-corpus MCP server SHIPPED
+  (`docs/concept/22_multi_corpus_server.md`).
+- Implemented: one registry-backed `serve` process resolves corpus per request
+  from explicit `corpus`, launch cwd, `--corpus` fallback default, or the sole
+  registered corpus. `find`, `search_codebase`, and `locate_implementation` emit
+  `corpus:hash` ids; `retrieve` routes by that id; `list_corpora` lists
+  registered names and roots. Explicit `--database` remains single-database
+  fixture/diagnostic mode.
+- Implemented: `connect` writes one stable `mycelia` entry per harness; Codex,
+  Claude Desktop, and Cursor config writers remove legacy `mycelia-<name>`
+  entries when updating file-backed configs.
+- Validation: focused MCP stdio test, fmt, clippy, CLI crate tests, full
+  workspace tests, release build, and release-binary two-corpus MCP smoke pass.
+- Forge gate caveat: after refreshing the live `forge` profile on the current
+  tree, routed eval is 47/68 (baseline 34/40, expanded 11/18, paraphrase 2/10)
+  with 12,490 chunks and 12,490 embeddings. This is below the prior 52/68 record
+  and must be investigated before more retrieval-default work; the slice touched
+  MCP surface and docs, not ranking.
+- NEXT SLICE: diagnose the refreshed Forge gate drift. Compare misses against the
+  prior 52/68 checkpoint, separate source-content drift from ranking regressions,
+  then either restore the gate or update the manifest/state with explicit
+  evidence.
 - Parallel context: Ruby tree-sitter extraction support is present in the
   current dirty tree from the adjacent Claude Desktop run and passed the full
   workspace test suite.
@@ -44,13 +46,16 @@ Agent working area. A fresh session reads this top to bottom, then follows
 - Validation: fmt, clippy, 90 tests, default release build, system-ORT release
   build, shell syntax, and lexical fixture smoke pass. Homebrew/core formula
   audit waits for the separate formula submission.
-- Corpus: refreshed `forge` is 12,386 chunks, 12,386 embeddings, model
-  `fastembed-5.17.2:BAAI/bge-small-en-v1.5`, db size 50.6 MB.
-- Eval (68-case, refreshed Forge): routed default 52/68 @ 1413.7 tokens/answer.
+- Corpus: refreshed `forge` is 12,490 chunks, 12,490 embeddings, model
+  `fastembed-5.17.2:BAAI/bge-small-en-v1.5`, db size 51.3 MB.
+- Eval (68-case, refreshed Forge): routed default 47/68 on the current tree
+  (baseline 34/40 @ 1078.7 tokens/answer, expanded 11/18 @ 1570.6,
+  paraphrase 2/10 @ 631.0). Prior 52/68 record requires follow-up diagnosis.
 - Publish gate: existing local history contains co-author trailers, so the safe
   GitHub publish path is a clean public history rather than pushing this full
   local development history.
-- Blockers: None.
+- Blockers: refreshed Forge retrieval gate drifted below the prior checkpoint;
+  diagnose before changing retrieval defaults or claiming gate stability.
 
 ## Decisions
 
@@ -169,6 +174,12 @@ Agent working area. A fresh session reads this top to bottom, then follows
 
 ## Session log
 
+- 2026-06-27: Shipped concept `22` single multi-corpus MCP server. `serve`
+  resolves corpus per request, emits `corpus:hash` ids, routes `retrieve` by
+  namespace, adds `list_corpora`, and keeps explicit `--database` as diagnostic
+  single-DB mode. `connect` now writes one `mycelia` entry and file-backed
+  adapters remove legacy per-corpus entries. Validation passed except the
+  refreshed live Forge gate drifted to routed 47/68, recorded as the next slice.
 - 2026-06-27: Authored concept `22` (multi-corpus server); reconciled concept
   `19` connect/golden-path notes and README MCP-surface/roadmap. Live MCP is
   connected to Claude Desktop (`find`/`retrieve` + aliases verified). Diagnosed

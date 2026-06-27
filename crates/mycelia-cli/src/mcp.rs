@@ -9,124 +9,275 @@ use rmcp::{
     schemars, tool, tool_handler, tool_router,
     transport::stdio,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::log::CorpusLogger;
+use crate::profile::{self, CorpusProfile};
 use crate::semantic::{FastEmbedProvider, MODEL_ID};
 
 type McpToolResult<T> = std::result::Result<T, String>;
 
-/// The embedding provider shared across `find` calls on one server. Tool
-/// handlers take `&self`, and `embed_query` needs `&mut`, so the provider lives
-/// behind a `Mutex`; `Arc` keeps `MyceliaServer` cloneable for the tool router.
-type SharedProvider = Arc<Mutex<FastEmbedProvider>>;
+/// Shared lazy embedding provider. Tool handlers take `&self`, and
+/// `embed_query` needs `&mut`, so the provider lives behind a `Mutex`; `Arc`
+/// keeps `MyceliaServer` cloneable for the tool router.
+type SharedProvider = Arc<Mutex<Option<FastEmbedProvider>>>;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct FindRequest {
-    #[schemars(description = "Text to search for in the configured Mycelia index")]
+    #[schemars(description = "Text to search for in the current project's Mycelia corpus")]
     query: String,
     #[serde(default = "default_limit")]
     #[schemars(description = "Maximum number of sourced headers to return")]
     limit: usize,
+    #[serde(default)]
+    #[schemars(
+        description = "Optional corpus name. Use only when the user explicitly names another project."
+    )]
+    corpus: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct RetrieveRequest {
-    #[schemars(description = "Deterministic chunk identifier returned by Mycelia")]
+    #[schemars(
+        description = "Namespaced chunk identifier returned by Mycelia, for example corpus:hash"
+    )]
     chunk_id: String,
 }
 
-const SERVER_INSTRUCTIONS: &str = "Mycelia is the token-efficient orientation path for this bound corpus. For questions like where something is implemented, what supports a feature or language, which files touch an area, or which symbol defines behavior, call find first. Use retrieve only for the selected chunk ids that look relevant. Shell grep/read remain useful follow-up tools for exact line edits after Mycelia has narrowed the search.";
+const SERVER_INSTRUCTIONS: &str = "Mycelia is the token-efficient orientation path for the current project corpus. For questions like where something is implemented, what supports a feature or language, which files touch an area, or which symbol defines behavior, call find first. Pass corpus only when the user explicitly names another project. Use retrieve only for the selected chunk ids that look relevant. Shell grep/read remain useful follow-up tools for exact line edits after Mycelia has narrowed the search.";
 
 #[derive(Clone)]
 struct MyceliaServer {
-    database: PathBuf,
+    target: ServerTarget,
     /// `Some` routes queries through embeddings; `None` serves lexical-only.
     provider: Option<SharedProvider>,
-    logger: Option<CorpusLogger>,
     tool_router: ToolRouter<Self>,
 }
 
-impl MyceliaServer {
-    fn new(
+#[derive(Clone)]
+enum ServerTarget {
+    Registry {
+        launch_cwd: PathBuf,
+        fallback_corpus: Option<String>,
+    },
+    Database {
         database: PathBuf,
-        provider: Option<SharedProvider>,
-        logger: Option<CorpusLogger>,
-    ) -> Self {
+    },
+}
+
+struct ResolvedCorpus {
+    name: Option<String>,
+    root: Option<PathBuf>,
+    database: PathBuf,
+}
+
+enum ResolveFailure {
+    Message(String),
+    NeedsCorpus {
+        message: String,
+        available: Vec<CorpusProfile>,
+    },
+}
+
+#[derive(Serialize)]
+struct NeedsCorpusResponse {
+    status: &'static str,
+    message: String,
+    available_corpora: Vec<CorpusListing>,
+}
+
+#[derive(Serialize)]
+struct CorpusListing {
+    name: String,
+    root: String,
+    default: bool,
+}
+
+impl MyceliaServer {
+    fn new(target: ServerTarget, provider: Option<SharedProvider>) -> Self {
         Self {
-            database,
+            target,
             provider,
-            logger,
             tool_router: Self::tool_router(),
         }
     }
 
-    /// Runs the bound retrieval path for one query and projects to headers.
-    /// Routed when a provider is loaded (it already falls back to reranked FTS5
-    /// for chunks lacking embeddings, including freshly re-indexed ones), lexical
-    /// otherwise.
-    fn find_headers(&self, query: &str, limit: usize) -> McpToolResult<Vec<SearchHeader>> {
+    fn resolve_corpus(
+        &self,
+        corpus: Option<&str>,
+    ) -> std::result::Result<ResolvedCorpus, ResolveFailure> {
+        match &self.target {
+            ServerTarget::Database { database } => {
+                if corpus.is_some() {
+                    return Err(ResolveFailure::Message(
+                        "`corpus` is unavailable when serving an explicit --database".to_owned(),
+                    ));
+                }
+                Ok(ResolvedCorpus {
+                    name: None,
+                    root: None,
+                    database: database.clone(),
+                })
+            }
+            ServerTarget::Registry {
+                launch_cwd,
+                fallback_corpus,
+            } => {
+                let available = profile::list().map_err(ResolveFailure::Message)?;
+                if let Some(name) = corpus {
+                    return match available.into_iter().find(|profile| profile.name == name) {
+                        Some(profile) => Ok(resolved_profile(profile)),
+                        None => Err(ResolveFailure::NeedsCorpus {
+                            message: format!("unknown corpus {name:?}; choose an available corpus"),
+                            available: profile::list().map_err(ResolveFailure::Message)?,
+                        }),
+                    };
+                }
+
+                if let Ok(profile) = profile::infer_from_cwd(launch_cwd) {
+                    return Ok(resolved_profile(profile));
+                }
+
+                if let Some(name) = fallback_corpus {
+                    return profile::get(name)
+                        .map(resolved_profile)
+                        .map_err(ResolveFailure::Message);
+                }
+
+                match available.len() {
+                    0 => Err(ResolveFailure::NeedsCorpus {
+                        message: "no corpora registered; run `mycelia setup` first".to_owned(),
+                        available,
+                    }),
+                    1 => Ok(resolved_profile(
+                        available
+                            .into_iter()
+                            .next()
+                            .expect("single available corpus"),
+                    )),
+                    _ => Err(ResolveFailure::NeedsCorpus {
+                        message:
+                            "current directory is not under a registered corpus; pass `corpus`"
+                                .to_owned(),
+                        available,
+                    }),
+                }
+            }
+        }
+    }
+
+    /// Runs retrieval for one resolved corpus and projects to headers. Routed
+    /// mode loads the embedding model lazily and offline-only; if the corpus has
+    /// no embeddings or the model is unavailable, the query falls back to
+    /// reranked FTS5.
+    fn find_headers(
+        &self,
+        resolved: &ResolvedCorpus,
+        query: &str,
+        limit: usize,
+    ) -> McpToolResult<Vec<SearchHeader>> {
         match &self.provider {
             Some(provider) => {
+                if !mycelia_core::has_embeddings(&resolved.database, MODEL_ID)
+                    .map_err(|error| error.to_string())?
+                {
+                    return mycelia_core::find_headers(&resolved.database, query, limit)
+                        .map_err(|error| error.to_string());
+                }
+
                 let mut guard = provider.lock().map_err(|error| error.to_string())?;
+                if guard.is_none() {
+                    match FastEmbedProvider::load(&resolved.database) {
+                        Ok(loaded) => *guard = Some(loaded),
+                        Err(error) => {
+                            eprintln!(
+                                "mycelia: embedding model unavailable, serving lexical retrieval: {error}"
+                            );
+                            return mycelia_core::find_headers(&resolved.database, query, limit)
+                                .map_err(|error| error.to_string());
+                        }
+                    }
+                }
+                let provider = guard
+                    .as_mut()
+                    .ok_or_else(|| "embedding provider unavailable".to_owned())?;
                 mycelia_core::find_headers_with_embeddings(
-                    &self.database,
+                    &resolved.database,
                     query,
                     limit,
                     RetrievalStrategy::Routed,
-                    &mut *guard,
+                    provider,
                 )
             }
-            None => mycelia_core::find_headers(&self.database, query, limit),
+            None => mycelia_core::find_headers(&resolved.database, query, limit),
         }
         .map_err(|error| error.to_string())
     }
 
     fn search_json(&self, request: &FindRequest) -> McpToolResult<String> {
-        let headers = self.find_headers(&request.query, request.limit)?;
+        let resolved = match self.resolve_corpus(request.corpus.as_deref()) {
+            Ok(resolved) => resolved,
+            Err(error) => return resolve_failure_json(self, error),
+        };
+        let headers = self.find_headers(&resolved, &request.query, request.limit)?;
 
         // Validate the sources behind the returned headers against disk. If any
-        // drifted, self-heal them and re-rank once so the headers stay precise
-        // and cannot contradict a later retrieve. The filesystem is the single
-        // source of truth, so find and retrieve converge on it. Headers carry no
-        // stale flag: a re-ranked result is simply accurate.
+        // drifted, self-heal them and re-rank once so the headers stay precise.
         let paths: Vec<String> = headers
             .iter()
             .map(|header| header.source_path.clone())
             .collect();
-        let drifted = mycelia_core::drifted_sources(&self.database, &paths)
+        let drifted = mycelia_core::drifted_sources(&resolved.database, &paths)
             .map_err(|error| error.to_string())?;
         let headers = if drifted.is_empty() {
             headers
         } else {
             for path in &drifted {
-                // Internal maintenance of the bound index; a heal error must not
-                // fail the search. The worst case is a slightly stale header that
-                // retrieve still corrects.
-                let _ = mycelia_core::refresh_source(&self.database, path);
+                let _ = mycelia_core::refresh_source(&resolved.database, path);
             }
-            self.find_headers(&request.query, request.limit)?
+            self.find_headers(&resolved, &request.query, request.limit)?
         };
 
-        if let Some(logger) = &self.logger {
+        if let Some(logger) = self.logger_for(&resolved) {
             logger.log_find(&request.query, &headers);
         }
 
-        serde_json::to_string(&headers).map_err(|error| error.to_string())
+        let value = headers_json(&headers, resolved.name.as_deref());
+        serde_json::to_string(&value).map_err(|error| error.to_string())
+    }
+
+    fn logger_for(&self, resolved: &ResolvedCorpus) -> Option<CorpusLogger> {
+        let name = resolved.name.as_deref()?;
+        profile::log_path_for(name)
+            .ok()
+            .map(|path| CorpusLogger::open(path, resolved.root.clone()))
+    }
+
+    fn instructions(&self) -> String {
+        let available = profile::list().unwrap_or_default();
+        if available.is_empty() {
+            return SERVER_INSTRUCTIONS.to_owned();
+        }
+        let names = available
+            .iter()
+            .map(|profile| profile.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{SERVER_INSTRUCTIONS} Available corpora: {names}.")
     }
 }
 
 #[tool_router]
 impl MyceliaServer {
     #[tool(
-        description = "Cheap first-pass codebase orientation over the configured Mycelia index. Use before grep/read when locating implementations, supported features, related files, symbols, or concepts in this corpus. Returns ranked source headers with paths, line ranges, signatures or synopses, scores, and chunk ids without opening full files."
+        description = "Cheap first-pass codebase orientation over the current project's Mycelia corpus by default. Pass corpus only to search a different project the user has named. Use before grep/read when locating implementations, supported features, related files, symbols, or concepts. Returns ranked source headers with paths, line ranges, signatures or synopses, scores, and namespaced chunk ids without opening full files."
     )]
     fn find(&self, Parameters(request): Parameters<FindRequest>) -> McpToolResult<String> {
         self.search_json(&request)
     }
 
     #[tool(
-        description = "Alias for find with a more explicit name: search the indexed codebase before grep/read to cheaply locate relevant files, symbols, features, or implementation areas."
+        description = "Alias for find with a more explicit name: search the current project's indexed codebase before grep/read to cheaply locate relevant files, symbols, features, or implementation areas. Pass corpus only when the user names another project."
     )]
     fn search_codebase(
         &self,
@@ -136,7 +287,7 @@ impl MyceliaServer {
     }
 
     #[tool(
-        description = "Alias for find tuned for implementation hunts. Use for questions like where is X implemented, what supports Y, or which source chunks define a feature before opening raw files."
+        description = "Alias for find tuned for implementation hunts. Use for questions like where is X implemented, what supports Y, or which source chunks define a feature before opening raw files. Pass corpus only when the user names another project."
     )]
     fn locate_implementation(
         &self,
@@ -146,18 +297,20 @@ impl MyceliaServer {
     }
 
     #[tool(
-        description = "Fetch the exact body for one chunk id selected from a prior Mycelia search result. Use after find/search_codebase/locate_implementation has identified the specific source chunk worth reading."
+        description = "Fetch the exact body for one namespaced chunk id selected from a prior Mycelia search result. Use after find/search_codebase/locate_implementation has identified the specific source chunk worth reading."
     )]
     fn retrieve(&self, Parameters(request): Parameters<RetrieveRequest>) -> McpToolResult<String> {
-        // Fresh sources return the precise chunk; a changed source returns the
-        // whole current file; a gone/unreadable source returns an `unavailable`
-        // signal. The model is never handed an indexed chunk whose source moved.
-        // An unknown identifier is still a hard error.
-        let outcome = mycelia_core::retrieve(&self.database, &request.chunk_id)
+        let (corpus_name, raw_chunk_id) = split_namespaced_chunk_id(&request.chunk_id);
+        let resolved = match self.resolve_corpus(corpus_name) {
+            Ok(resolved) => resolved,
+            Err(error) => return resolve_failure_json(self, error),
+        };
+
+        let outcome = mycelia_core::retrieve(&resolved.database, raw_chunk_id)
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("chunk not found: {}", request.chunk_id))?;
 
-        if let Some(logger) = &self.logger {
+        if let Some(logger) = self.logger_for(&resolved) {
             let source_path = match &outcome {
                 mycelia_core::Retrieved::Ok { chunk } => chunk.source_path.as_str(),
                 mycelia_core::Retrieved::File { source_path, .. } => source_path.as_str(),
@@ -168,14 +321,8 @@ impl MyceliaServer {
 
         let mut value = serde_json::to_value(&outcome).map_err(|error| error.to_string())?;
 
-        // Drift was detected. Silently self-heal the launch-bound index so later
-        // queries read fresh data; this is internal maintenance, not a
-        // model-facing write. Never fail the call on a heal error: the caller
-        // already has correct content. Only when the index cannot be repaired
-        // (for example a read-only filesystem) surface a last-resort hint the
-        // harness can relay so the user can run `mycelia refresh`.
         if let Some(source_path) = drifted_source(&outcome)
-            && mycelia_core::refresh_source(&self.database, source_path).is_err()
+            && mycelia_core::refresh_source(&resolved.database, source_path).is_err()
             && let Some(object) = value.as_object_mut()
         {
             object.insert(
@@ -186,7 +333,31 @@ impl MyceliaServer {
             );
         }
 
+        if let Some(name) = resolved.name.as_deref()
+            && let Some(object) = value.as_object_mut()
+        {
+            object.insert(
+                "corpus".to_owned(),
+                serde_json::Value::String(name.to_owned()),
+            );
+        }
+
         serde_json::to_string(&value).map_err(|error| error.to_string())
+    }
+
+    #[tool(
+        description = "List registered Mycelia corpora. Use only when a request names another project ambiguously or Mycelia returns needs_corpus."
+    )]
+    fn list_corpora(&self) -> McpToolResult<String> {
+        let all = profile::list().map_err(|error| error.to_string())?;
+        let default_name = match &self.target {
+            ServerTarget::Registry { launch_cwd, .. } => {
+                profile::infer_from_cwd(launch_cwd).ok().map(|p| p.name)
+            }
+            ServerTarget::Database { .. } => None,
+        };
+        serde_json::to_string(&corpus_listings(all, default_name.as_deref()))
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -198,64 +369,53 @@ impl ServerHandler for MyceliaServer {
                 Implementation::new("mycelia", env!("CARGO_PKG_VERSION"))
                     .with_title("Mycelia local knowledge index"),
             )
-            .with_instructions(SERVER_INSTRUCTIONS)
+            .with_instructions(self.instructions())
     }
 }
 
 pub(crate) fn serve(
-    database: PathBuf,
-    corpus_name: Option<String>,
-    corpus_root: Option<PathBuf>,
+    database: Option<PathBuf>,
+    fallback_corpus: Option<String>,
+    launch_cwd: PathBuf,
     lexical: bool,
 ) -> McpToolResult<()> {
-    if !database.is_file() {
-        return Err(format!(
-            "MCP database does not exist or is not a file: {}",
-            database.display()
-        ));
-    }
-
-    // Build the logger before loading the model so the serve-start event names
-    // the embeddings status accurately. Best-effort: a missing log directory
-    // just means no log.
-    let logger = corpus_name.as_deref().and_then(|name| {
-        crate::profile::log_path_for(name)
-            .ok()
-            .map(|path| CorpusLogger::open(path, corpus_root.clone()))
-    });
-
-    // Load the embedding model once at startup so `find` can route. Diagnostics
-    // go to stderr; stdout is reserved for the MCP protocol. The model is loaded
-    // only when the bound corpus actually has embeddings, so serving an
-    // unembedded index never pays model init or triggers a download. A load
-    // failure (for example, an air-gapped first run) degrades to lexical
-    // retrieval rather than refusing to serve.
-    let provider = if lexical {
-        None
-    } else if !mycelia_core::has_embeddings(&database, MODEL_ID)
-        .map_err(|error| error.to_string())?
-    {
-        eprintln!("mycelia: corpus has no embeddings, serving reranked FTS5");
-        None
+    let target = if let Some(database) = database {
+        if !database.is_file() {
+            return Err(format!(
+                "MCP database does not exist or is not a file: {}",
+                database.display()
+            ));
+        }
+        ServerTarget::Database { database }
     } else {
-        match FastEmbedProvider::load(&database) {
-            Ok(provider) => Some(Arc::new(Mutex::new(provider))),
-            Err(error) => {
-                eprintln!(
-                    "mycelia: embedding model unavailable, serving lexical retrieval: {error}"
-                );
-                None
-            }
+        if let Some(name) = &fallback_corpus {
+            profile::get(name)?;
+        }
+        ServerTarget::Registry {
+            launch_cwd,
+            fallback_corpus,
         }
     };
+
+    // Routed mode loads the embedding model lazily on the first query for any
+    // corpus that already has embeddings. `load` is offline-only, so serving,
+    // find, and connect never trigger hidden model downloads.
+    let provider = (!lexical).then(|| Arc::new(Mutex::new(None)));
 
     let embeddings_status = if provider.is_some() {
         "routed"
     } else {
         "lexical"
     };
-    if let Some(logger) = &logger {
-        logger.log_serve_start(MODEL_ID, embeddings_status);
+    if matches!(&target, ServerTarget::Registry { .. })
+        && let Ok(corpora) = profile::list()
+    {
+        for corpus in corpora {
+            if let Ok(path) = profile::log_path_for(&corpus.name) {
+                CorpusLogger::open(path, Some(corpus.root))
+                    .log_serve_start(MODEL_ID, embeddings_status);
+            }
+        }
     }
 
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -264,7 +424,7 @@ pub(crate) fn serve(
         .map_err(|error| error.to_string())?;
 
     runtime.block_on(async move {
-        let service = MyceliaServer::new(database, provider, logger)
+        let service = MyceliaServer::new(target, provider)
             .serve(stdio())
             .await
             .map_err(|error| error.to_string())?;
@@ -289,6 +449,73 @@ fn drifted_source(outcome: &Retrieved) -> Option<&str> {
     }
 }
 
+fn resolved_profile(profile: CorpusProfile) -> ResolvedCorpus {
+    ResolvedCorpus {
+        name: Some(profile.name),
+        root: Some(profile.root),
+        database: profile.database,
+    }
+}
+
+fn split_namespaced_chunk_id(chunk_id: &str) -> (Option<&str>, &str) {
+    chunk_id
+        .split_once(':')
+        .map_or((None, chunk_id), |(corpus, id)| (Some(corpus), id))
+}
+
+fn headers_json(headers: &[SearchHeader], corpus: Option<&str>) -> serde_json::Value {
+    let mut value = serde_json::to_value(headers).unwrap_or_else(|_| serde_json::json!([]));
+    if let Some(corpus) = corpus
+        && let Some(items) = value.as_array_mut()
+    {
+        for item in items {
+            if let Some(object) = item.as_object_mut() {
+                if let Some(raw_id) = object.get("chunk_id").and_then(|value| value.as_str()) {
+                    object.insert(
+                        "chunk_id".to_owned(),
+                        serde_json::Value::String(format!("{corpus}:{raw_id}")),
+                    );
+                }
+                object.insert(
+                    "corpus".to_owned(),
+                    serde_json::Value::String(corpus.to_owned()),
+                );
+            }
+        }
+    }
+    value
+}
+
+fn resolve_failure_json(server: &MyceliaServer, error: ResolveFailure) -> McpToolResult<String> {
+    match error {
+        ResolveFailure::Message(message) => Err(message),
+        ResolveFailure::NeedsCorpus { message, available } => {
+            let default_name = match &server.target {
+                ServerTarget::Registry { launch_cwd, .. } => {
+                    profile::infer_from_cwd(launch_cwd).ok().map(|p| p.name)
+                }
+                ServerTarget::Database { .. } => None,
+            };
+            serde_json::to_string(&NeedsCorpusResponse {
+                status: "needs_corpus",
+                message,
+                available_corpora: corpus_listings(available, default_name.as_deref()),
+            })
+            .map_err(|error| error.to_string())
+        }
+    }
+}
+
+fn corpus_listings(all: Vec<CorpusProfile>, default_name: Option<&str>) -> Vec<CorpusListing> {
+    all.into_iter()
+        .map(|profile| CorpusListing {
+            default: default_name == Some(profile.name.as_str()),
+            name: profile.name,
+            root: profile.root.display().to_string(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -305,12 +532,13 @@ mod tests {
         fs::create_dir_all(&root).expect("create corpus");
         fs::write(root.join("notes.txt"), "a precise sourced result").expect("write corpus");
         mycelia_core::index_corpus(&root, &database).expect("index corpus");
-        let server = MyceliaServer::new(database, None, None);
+        let server = MyceliaServer::new(ServerTarget::Database { database }, None);
 
         let output = server
             .find(Parameters(FindRequest {
                 query: "precise".to_owned(),
                 limit: 5,
+                corpus: None,
             }))
             .expect("find");
 
@@ -327,7 +555,7 @@ mod tests {
         fs::create_dir_all(&root).expect("create corpus");
         fs::write(root.join("notes.txt"), "indexed content").expect("write corpus");
         mycelia_core::index_corpus(&root, &database).expect("index corpus");
-        let server = MyceliaServer::new(database, None, None);
+        let server = MyceliaServer::new(ServerTarget::Database { database }, None);
 
         let error = server
             .retrieve(Parameters(RetrieveRequest {
@@ -352,11 +580,8 @@ mod tests {
             .id
             .clone();
 
-        // Mutate the source without re-indexing; the indexed chunk is stale, so
-        // the model receives the whole current file (real, up-to-date code)
-        // rather than the outdated indexed slice.
         fs::write(&file, "the content has changed entirely").expect("rewrite corpus");
-        let server = MyceliaServer::new(database, None, None);
+        let server = MyceliaServer::new(ServerTarget::Database { database }, None);
         let output = server
             .retrieve(Parameters(RetrieveRequest {
                 chunk_id: chunk_id.clone(),
@@ -382,14 +607,18 @@ mod tests {
             .source_hash
             .clone();
 
-        // Drift the source without re-indexing, then search. find must validate,
-        // self-heal, and return a header reflecting the current file.
         fs::write(&file, "needle renewed content\nwith another line").expect("rewrite corpus");
-        let server = MyceliaServer::new(database.clone(), None, None);
+        let server = MyceliaServer::new(
+            ServerTarget::Database {
+                database: database.clone(),
+            },
+            None,
+        );
         let output = server
             .find(Parameters(FindRequest {
                 query: "needle".to_owned(),
                 limit: 5,
+                corpus: None,
             }))
             .expect("find");
 
@@ -401,8 +630,6 @@ mod tests {
             indexed_hash,
             "header must carry the current source hash, not the stale one"
         );
-        // The index converged on disk: the stale term is gone, the current term
-        // is present.
         assert!(
             mycelia_core::find(&database, "original", 5)
                 .expect("find stale")
@@ -431,13 +658,16 @@ mod tests {
             .clone();
 
         fs::write(&file, "the renewed sourced content").expect("rewrite corpus");
-        let server = MyceliaServer::new(database.clone(), None, None);
+        let server = MyceliaServer::new(
+            ServerTarget::Database {
+                database: database.clone(),
+            },
+            None,
+        );
         server
             .retrieve(Parameters(RetrieveRequest { chunk_id }))
             .expect("retrieve");
 
-        // The server quietly re-indexed the drifted file: the stale term is gone
-        // and the current term is now a fresh, retrievable chunk.
         assert!(
             mycelia_core::find(&database, "original", 5)
                 .expect("find stale")
@@ -456,7 +686,13 @@ mod tests {
         let temp = tempdir().expect("tempdir");
         let database = temp.path().join("missing.sqlite3");
 
-        let error = serve(database.clone(), None, None, true).expect_err("missing database");
+        let error = serve(
+            Some(database.clone()),
+            None,
+            temp.path().to_path_buf(),
+            true,
+        )
+        .expect_err("missing database");
 
         assert_eq!(
             error,

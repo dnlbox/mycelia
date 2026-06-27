@@ -1,7 +1,7 @@
 # Multi-corpus MCP server
 
-Spec, not yet implemented. This document defines the move from one stdio server
-per corpus to a single server that resolves the corpus per request.
+Implemented 2026-06-27. This document records the move from one stdio server per
+corpus to a single server that resolves the corpus per request.
 
 ## Why now
 
@@ -138,6 +138,9 @@ each corpus validates against its own root.
 
 ## Migration, mapped to files
 
+Status: shipped in `crates/mycelia-cli/src/mcp.rs`, `main.rs`, and the stdio MCP
+integration test.
+
 1. `MyceliaServer` (`mcp.rs`): single database to lazy registry plus the per-call
    resolver calling `infer_from_cwd`.
 2. Tool handlers (`mcp.rs`): add optional `corpus`; apply the resolution ladder;
@@ -169,3 +172,22 @@ each corpus validates against its own root.
   carries the right root.
 - Concept `18` (routed MCP server): the shared-provider, route-by-default design
   is preserved; only the binding becomes per-request instead of per-launch.
+
+## Implemented result
+
+- `serve` with no target starts a registry-backed MCP server and resolves the
+  current corpus from launch cwd. `serve --corpus X` remains valid, but X is now a
+  fallback default rather than the only reachable corpus.
+- `find`, `search_codebase`, and `locate_implementation` accept optional
+  `corpus`; returned headers include `corpus` and namespaced `corpus:hash`
+  `chunk_id`s.
+- `retrieve` routes by the namespaced id and keeps the existing freshness and
+  self-heal behavior for the resolved corpus.
+- `list_corpora` returns registered names, roots, and the cwd default marker.
+- `connect` writes one stable `mycelia` server entry per harness. The Codex,
+  Claude Desktop, and Cursor config writers remove legacy `mycelia-<name>`
+  entries when updating their files.
+- Validation: fmt, clippy, full workspace tests, release build, and a
+  release-binary two-corpus MCP smoke passed. The refreshed Forge retrieval gate
+  drifted to 47/68 after indexing the current tree; see `BUILD_STATE.md` for the
+  follow-up.

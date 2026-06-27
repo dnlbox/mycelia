@@ -17,12 +17,13 @@ The shipped baseline includes:
 - deterministic discovery over ignored local files
 - range-addressed UTF-8 chunks with byte ranges and one-based line ranges
 - SQLite persistence with content-hash freshness
-- tree-sitter chunking for Rust, TypeScript, TSX, and Python
+- tree-sitter chunking for Rust, TypeScript, TSX, Python, and Ruby
 - reranked FTS5, vector, hybrid, and routed retrieval strategies
 - local FastEmbed embeddings using `BAAI/bge-small-en-v1.5`
 - named corpus profiles with derived local database paths
 - manifest-driven retrieval evaluation with token-per-answer estimates
-- a read-only stdio MCP server exposing `find` and `retrieve`
+- a read-only multi-corpus stdio MCP server exposing `find`, aliases,
+  `retrieve`, and `list_corpora`
 - query-time freshness validation plus MCP self-heal for drifted sources
 - journey commands: `setup`, `connect`, `stats`, `status`, `refresh`, `list`,
   and `delete`
@@ -33,8 +34,12 @@ queries. Recent measured results on the refreshed local Forge corpus:
 
 | Strategy | Hits | Tokens per answer |
 | --- | ---: | ---: |
-| `fts5-reranked` | 48 / 68 | 1450.7 |
-| `routed` | 52 / 68 | 1413.0 |
+| `fts5-reranked` | 46 / 68 | see `BUILD_STATE.md` |
+| `routed` | 47 / 68 | see `BUILD_STATE.md` |
+
+This is below the prior 52/68 routed checkpoint after refreshing the live Forge
+index on the current tree. `BUILD_STATE.md` records that drift as the next
+diagnostic slice rather than treating it as a retrieval-default decision.
 
 `routed` is the CLI default and the MCP default when embeddings are available. It
 falls back to reranked FTS5 when a corpus has no embeddings or the cached model is
@@ -146,11 +151,18 @@ A command accepts either a named corpus or explicit paths, never both.
 
 ## MCP surface
 
-`serve` runs a read-only MCP server over stdio for local AI clients. The process
-is bound to one database or named corpus at launch and exposes exactly:
+`serve` runs a read-only MCP server over stdio for local AI clients. In normal
+named-corpus mode it is a single multi-corpus server: each request resolves the
+corpus from an explicit `corpus` argument, the launch working directory, the
+`--corpus` fallback default, or the sole registered corpus. Explicit
+`--database` remains available for fixture and diagnostic servers. The MCP tools
+are:
 
 - `find`: ranked, sourced headers under a bounded result budget
-- `retrieve`: one selected chunk body by deterministic `chunk_id`
+- `search_codebase`: alias for `find`
+- `locate_implementation`: alias for `find`
+- `retrieve`: one selected chunk body by namespaced `corpus:hash` `chunk_id`
+- `list_corpora`: registered corpus names and roots for disambiguation
 
 `find` does not return chunk bodies. A header includes path, byte range, line
 range, score, extractor, `source_hash`, `chunk_id`, and a signature or synopsis.
@@ -158,18 +170,12 @@ range, score, extractor, `source_hash`, `chunk_id`, and a signature or synopsis.
 it returns the whole current file live so the caller gets real, up-to-date code.
 If the source vanished, escaped the corpus root, or cannot be verified as text, it
 returns a structured `unavailable` signal. The MCP server also self-heals the
-launch-bound index for touched drifted files, so later `find` results converge
+resolved corpus index for touched drifted files, so later `find` results converge
 back to fresh headers.
 
 In stdio mode, stdout is reserved for MCP protocol messages. Diagnostics go to
 stderr. The server is intentionally read-only: indexing, ignore changes, mutation
-tools, watchers, and federation are deferred.
-
-The launch-bound, one-corpus-per-server model is planned to become a single
-multi-corpus server: `find` and `retrieve` gain an optional `corpus` argument,
-the corpus is otherwise inferred from the working directory, and `connect` writes
-one harness entry that reaches every registered corpus. See
-`docs/concept/22_multi_corpus_server.md`.
+tools, watchers, and arbitrary database selection are not exposed to the model.
 
 ## Retrieval model
 
@@ -205,9 +211,8 @@ retrieval, explicit freshness guarantees, and eventual cross-corpus queries.
 Deferred work is tracked in `docs/concept/` and `BUILD_STATE.md`. The current
 ordering is:
 
-1. Collapse the per-corpus servers into a single multi-corpus server with
-   per-request corpus resolution and one `connect` entry
-   (`docs/concept/22_multi_corpus_server.md`).
+1. Investigate the refreshed Forge retrieval gate drift recorded in
+   `BUILD_STATE.md` before changing retrieval defaults.
 2. Add a debounced watcher as a latency optimization for keeping embeddings
    current after query-time self-heal.
 3. Add typed graph edges only where measured queries prove flat retrieval cannot

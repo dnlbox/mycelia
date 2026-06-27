@@ -230,6 +230,11 @@ struct ResolvedCorpus {
     corpus_root: Option<PathBuf>,
 }
 
+struct ResolvedServe {
+    database: Option<PathBuf>,
+    fallback_corpus: Option<String>,
+}
+
 impl CwdTarget {
     fn resolve(self) -> Result<ResolvedCorpus> {
         match (self.corpus, self.database) {
@@ -297,6 +302,29 @@ impl AnyTarget {
 
     fn resolve_database(self) -> Result<PathBuf> {
         Ok(self.resolve()?.database)
+    }
+
+    fn resolve_serve(self) -> Result<ResolvedServe> {
+        match (self.corpus, self.database) {
+            (Some(name), None) => {
+                let profile = profile::get(&name)?;
+                Ok(ResolvedServe {
+                    database: None,
+                    fallback_corpus: Some(profile.name),
+                })
+            }
+            (None, Some(db)) => Ok(ResolvedServe {
+                database: Some(db),
+                fallback_corpus: None,
+            }),
+            (None, None) => Ok(ResolvedServe {
+                database: None,
+                fallback_corpus: None,
+            }),
+            (Some(_), Some(_)) => {
+                Err("--corpus and --database cannot be used together".to_string())
+            }
+        }
     }
 }
 
@@ -453,11 +481,13 @@ where
         }
 
         Command::Serve { target, lexical } => {
-            let resolved = target.resolve()?;
+            let resolved = target.resolve_serve()?;
+            let launch_cwd = std::env::current_dir()
+                .map_err(|error| format!("cannot determine current directory: {error}"))?;
             mcp::serve(
                 resolved.database,
-                resolved.corpus_name,
-                resolved.corpus_root,
+                resolved.fallback_corpus,
+                launch_cwd,
                 lexical,
             )
         }
@@ -560,26 +590,26 @@ fn cmd_connect(harness: Option<Harness>, target: CwdTarget) -> Result<()> {
         .ok_or_else(|| "binary path contains non-UTF-8 characters".to_string())?
         .to_owned();
 
-    let server_name = format!("mycelia-{corpus_name}");
+    let server_name = "mycelia";
     let args = ["serve", "--corpus", &corpus_name];
 
     match harness {
-        Harness::ClaudeCode => connect_claude_code(&server_name, &binary_str, &args),
+        Harness::ClaudeCode => connect_claude_code(server_name, &binary_str, &args),
         Harness::ClaudeDesktop => connect_json_file(
-            &server_name,
+            server_name,
             &binary_str,
             &args,
             claude_desktop_config_path()?,
             harness.server_label(),
         ),
         Harness::Cursor => connect_json_file(
-            &server_name,
+            server_name,
             &binary_str,
             &args,
             cursor_config_path()?,
             harness.server_label(),
         ),
-        Harness::Codex => connect_codex(&server_name, &binary_str, &args),
+        Harness::Codex => connect_codex(server_name, &binary_str, &args),
     }
 }
 
@@ -640,6 +670,12 @@ fn connect_json_file(
         .or_insert_with(|| serde_json::json!({}))
         .as_object_mut()
         .ok_or_else(|| format!("mcpServers is not an object in {}", config_path.display()))?
+        .retain(|name, _| name == server_name || !name.starts_with("mycelia-"));
+    root.as_object_mut()
+        .ok_or_else(|| format!("unexpected root type in {}", config_path.display()))?
+        .get_mut("mcpServers")
+        .and_then(|value| value.as_object_mut())
+        .ok_or_else(|| format!("mcpServers is not an object in {}", config_path.display()))?
         .insert(server_name.to_owned(), entry);
 
     // Write back.
@@ -691,6 +727,14 @@ fn connect_codex(server_name: &str, binary: &str, args: &[&str]) -> Result<()> {
     let servers = document["mcp_servers"]
         .as_table_mut()
         .ok_or_else(|| format!("mcp_servers is not a table in {}", config_path.display()))?;
+    let legacy = servers
+        .iter()
+        .filter(|(name, _)| *name != server_name && name.starts_with("mycelia-"))
+        .map(|(name, _)| name.to_owned())
+        .collect::<Vec<_>>();
+    for name in legacy {
+        servers.remove(&name);
+    }
 
     let mut entry = toml_edit::Table::new();
     entry["command"] = toml_edit::value(binary);

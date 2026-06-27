@@ -423,7 +423,11 @@ fn connect_codex_writes_idempotent_mcp_server_config() {
     let home = temp.path().join("home");
     fs::create_dir_all(&root).expect("create corpus");
     fs::create_dir_all(home.join(".codex")).expect("create codex config dir");
-    fs::write(home.join(".codex/config.toml"), "model = \"test\"\n").expect("seed config");
+    fs::write(
+        home.join(".codex/config.toml"),
+        "model = \"test\"\n\n[mcp_servers.mycelia-forge]\ncommand = \"old\"\nargs = [\"serve\", \"--corpus\", \"forge\"]\n",
+    )
+    .expect("seed config");
     write_file(&root.join("notes.txt"), "a precise named corpus result");
 
     let setup = Command::new(bin_path())
@@ -462,7 +466,8 @@ fn connect_codex_writes_idempotent_mcp_server_config() {
 
     let config = fs::read_to_string(home.join(".codex/config.toml")).expect("read config");
     assert!(config.contains("model = \"test\""));
-    assert_eq!(config.matches("[mcp_servers.mycelia-forge]").count(), 1);
+    assert_eq!(config.matches("[mcp_servers.mycelia]").count(), 1);
+    assert_eq!(config.matches("[mcp_servers.mycelia-forge]").count(), 0);
     assert!(config.contains("command = "));
     assert!(config.contains("args = [\"serve\", \"--corpus\", \"forge\"]"));
 }
@@ -510,10 +515,13 @@ fn corpus_profiles_reject_unsafe_names_and_mixed_targets() {
 fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
     let temp = TempDir::new().expect("tempdir");
     let root = temp.path().join("corpus");
+    let other_root = temp.path().join("other-corpus");
     let config_home = temp.path().join("config");
     let data_home = temp.path().join("data");
     fs::create_dir_all(&root).expect("create corpus");
+    fs::create_dir_all(&other_root).expect("create other corpus");
     write_file(&root.join("notes.txt"), "a precise sourced result");
+    write_file(&other_root.join("other.txt"), "a second corpus result");
     run_success_with_homes(
         &[
             "setup",
@@ -525,12 +533,24 @@ fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
         &config_home,
         &data_home,
     );
+    run_success_with_homes(
+        &[
+            "setup",
+            other_root.to_str().expect("other root path"),
+            "--name",
+            "candelabrum",
+            "--no-embed",
+        ],
+        &config_home,
+        &data_home,
+    );
 
     let mut child = Command::new(bin_path())
         // Lexical mode keeps the test offline; routing is covered by core tests.
-        .args(["serve", "--corpus", "forge", "--lexical"])
+        .args(["serve", "--lexical"])
         .env("MYCELIA_CONFIG_HOME", &config_home)
         .env("MYCELIA_DATA_HOME", &data_home)
+        .current_dir(&root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -592,6 +612,7 @@ fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
         "search_codebase",
         "locate_implementation",
         "retrieve",
+        "list_corpora",
     ] {
         assert!(
             names.contains(&expected),
@@ -629,7 +650,11 @@ fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
         .expect("text content");
     assert!(content.contains("\"source_path\":\"notes.txt\""));
     assert!(content.contains("\"chunk_id\""));
+    assert!(content.contains("\"chunk_id\":\"forge:"));
+    assert!(content.contains("\"corpus\":\"forge\""));
     assert!(!content.contains("\"text\""));
+    let headers: Value = serde_json::from_str(content).expect("find headers json");
+    let chunk_id = headers[0]["chunk_id"].as_str().expect("chunk id");
 
     write_json_line(
         &mut stdin,
@@ -638,10 +663,32 @@ fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
             "id": 4,
             "method": "tools/call",
             "params": {
+                "name": "retrieve",
+                "arguments": {
+                    "chunk_id": chunk_id
+                }
+            }
+        }),
+    );
+    let retrieved = read_json_line(&mut stdout);
+    let retrieved_content = retrieved["result"]["content"][0]["text"]
+        .as_str()
+        .expect("retrieve text content");
+    assert!(retrieved_content.contains("\"status\":\"ok\""));
+    assert!(retrieved_content.contains("\"corpus\":\"forge\""));
+
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
                 "name": "search_codebase",
                 "arguments": {
-                    "query": "precise",
-                    "limit": 5
+                    "query": "second",
+                    "limit": 5,
+                    "corpus": "candelabrum"
                 }
             }
         }),
@@ -650,8 +697,29 @@ fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
     let alias_content = alias_result["result"]["content"][0]["text"]
         .as_str()
         .expect("alias text content");
-    assert!(alias_content.contains("\"source_path\":\"notes.txt\""));
-    assert!(alias_content.contains("\"chunk_id\""));
+    assert!(alias_content.contains("\"source_path\":\"other.txt\""));
+    assert!(alias_content.contains("\"chunk_id\":\"candelabrum:"));
+    assert!(alias_content.contains("\"corpus\":\"candelabrum\""));
+
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "list_corpora",
+                "arguments": {}
+            }
+        }),
+    );
+    let corpora = read_json_line(&mut stdout);
+    let corpora_content = corpora["result"]["content"][0]["text"]
+        .as_str()
+        .expect("corpora text content");
+    assert!(corpora_content.contains("\"name\":\"forge\""));
+    assert!(corpora_content.contains("\"name\":\"candelabrum\""));
+    assert!(corpora_content.contains("\"default\":true"));
 
     drop(stdin);
     let status = child.wait().expect("wait for MCP server");
@@ -665,14 +733,83 @@ fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
     assert!(status.success(), "MCP server failed:\n{stderr}");
 
     let stats = run_success_with_homes(
-        &["stats", "--recent", "2", "--corpus", "forge"],
+        &["stats", "--recent", "3", "--corpus", "forge"],
         &config_home,
         &data_home,
     );
-    assert!(stats.contains("queries answered:  2"));
+    assert!(stats.contains("queries answered:  1"));
     assert!(stats.contains("recent activity:"));
     assert!(stats.contains("  find "));
+    assert!(stats.contains("  retrieve "));
     assert!(stats.contains("q=\"precise\""));
+
+    let mut needs_child = Command::new(bin_path())
+        .args(["serve", "--lexical"])
+        .env("MYCELIA_CONFIG_HOME", &config_home)
+        .env("MYCELIA_DATA_HOME", &data_home)
+        .current_dir(temp.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start disambiguation MCP server");
+    let mut needs_stdin = needs_child.stdin.take().expect("MCP stdin");
+    let mut needs_stdout = BufReader::new(needs_child.stdout.take().expect("MCP stdout"));
+    write_json_line(
+        &mut needs_stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "mycelia-test",
+                    "version": "0.1.0"
+                }
+            }
+        }),
+    );
+    let _ = read_json_line(&mut needs_stdout);
+    write_json_line(
+        &mut needs_stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+        }),
+    );
+    write_json_line(
+        &mut needs_stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "find",
+                "arguments": {
+                    "query": "precise"
+                }
+            }
+        }),
+    );
+    let needs_result = read_json_line(&mut needs_stdout);
+    let needs_content = needs_result["result"]["content"][0]["text"]
+        .as_str()
+        .expect("needs_corpus text content");
+    assert!(needs_content.contains("\"status\":\"needs_corpus\""));
+    assert!(needs_content.contains("\"name\":\"forge\""));
+    assert!(needs_content.contains("\"name\":\"candelabrum\""));
+    drop(needs_stdin);
+    let needs_status = needs_child.wait().expect("wait for MCP server");
+    let mut needs_stderr = String::new();
+    needs_child
+        .stderr
+        .take()
+        .expect("MCP stderr")
+        .read_to_string(&mut needs_stderr)
+        .expect("read MCP stderr");
+    assert!(needs_status.success(), "MCP server failed:\n{needs_stderr}");
 }
 
 #[test]
