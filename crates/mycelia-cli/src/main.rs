@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 type Result<T> = std::result::Result<T, String>;
 
 const MISSING_EMBEDDINGS_HINT: &str = "corpus has no embeddings for this model; run `mycelia embed` first or pass `--strategy fts5-reranked`";
+const CONNECT_HARNESS_HELP: &str = "Supported harnesses:\n  codex            Codex CLI (~/.codex/config.toml)\n  claude-code      Claude Code CLI (`claude mcp add`)\n  claude-desktop   Claude Desktop app config\n  cursor           Cursor MCP config";
 
 enum Retrieval {
     Embedded(Box<semantic::FastEmbedProvider>),
@@ -51,6 +52,25 @@ impl Strategy {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum Harness {
+    Codex,
+    ClaudeCode,
+    ClaudeDesktop,
+    Cursor,
+}
+
+impl Harness {
+    fn server_label(self) -> &'static str {
+        match self {
+            Self::Codex => "Codex",
+            Self::ClaudeCode => "Claude Code",
+            Self::ClaudeDesktop => "Claude Desktop",
+            Self::Cursor => "Cursor",
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "mycelia")]
 #[command(version)]
@@ -82,9 +102,11 @@ enum Command {
         no_embed: bool,
     },
     /// Wire the corpus into a supported AI harness.
+    #[command(after_help = CONNECT_HARNESS_HELP)]
     Connect {
-        /// Target harness: claude-code, claude-desktop, cursor, codex.
-        harness: String,
+        /// Target harness to configure. Run `mycelia connect --help` to list supported values.
+        #[arg(value_enum, value_name = "HARNESS")]
+        harness: Option<Harness>,
         #[command(flatten)]
         target: CwdTarget,
     },
@@ -332,7 +354,7 @@ where
             name,
             no_embed,
         } => cmd_setup(path, name, no_embed),
-        Command::Connect { harness, target } => cmd_connect(&harness, target),
+        Command::Connect { harness, target } => cmd_connect(harness, target),
         Command::Stats { target } => cmd_stats(target),
         Command::Status { target } => cmd_status(target),
         Command::Refresh { target } => cmd_refresh(target),
@@ -518,7 +540,10 @@ fn cmd_setup(path: Option<PathBuf>, name_flag: Option<String>, no_embed: bool) -
     Ok(())
 }
 
-fn cmd_connect(harness: &str, target: CwdTarget) -> Result<()> {
+fn cmd_connect(harness: Option<Harness>, target: CwdTarget) -> Result<()> {
+    let harness = harness.ok_or_else(|| {
+        format!("connect requires a harness.\n\n{CONNECT_HARNESS_HELP}\n\nUsage: mycelia connect <harness>")
+    })?;
     let resolved = target.resolve()?;
     let corpus_name = resolved.corpus_name.ok_or_else(|| {
         "connect requires a named corpus; use --corpus or run from a registered directory"
@@ -536,25 +561,22 @@ fn cmd_connect(harness: &str, target: CwdTarget) -> Result<()> {
     let args = ["serve", "--corpus", &corpus_name];
 
     match harness {
-        "claude-code" => connect_claude_code(&server_name, &binary_str, &args),
-        "claude-desktop" => connect_json_file(
+        Harness::ClaudeCode => connect_claude_code(&server_name, &binary_str, &args),
+        Harness::ClaudeDesktop => connect_json_file(
             &server_name,
             &binary_str,
             &args,
             claude_desktop_config_path()?,
-            "Claude Desktop",
+            harness.server_label(),
         ),
-        "cursor" => connect_json_file(
+        Harness::Cursor => connect_json_file(
             &server_name,
             &binary_str,
             &args,
             cursor_config_path()?,
-            "Cursor",
+            harness.server_label(),
         ),
-        "codex" => connect_codex(&server_name, &binary_str, &args),
-        other => Err(format!(
-            "unknown harness '{other}'; supported: claude-code, claude-desktop, cursor, codex"
-        )),
+        Harness::Codex => connect_codex(&server_name, &binary_str, &args),
     }
 }
 

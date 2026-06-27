@@ -8,6 +8,8 @@ Agent working area. A fresh session reads this top to bottom, then follows
 - Latest slice: `setup`/`refresh`/`embed` progress now names the embedding model
   preparation phase before batch counters begin, then summarizes embedded,
   unchanged, and stored bytes.
+- Latest CLI polish: `connect` now exposes supported harnesses in help, bare
+  `mycelia connect`, and invalid-harness errors.
 - Validation: fmt, clippy, CLI tests, full workspace tests, release build,
   fixture setup/find smoke, and live `refresh --corpus forge` progress check.
 - Milestone: slice `21` distribution readiness SHIPPED. AGENTS.md and concept
@@ -142,6 +144,9 @@ Agent working area. A fresh session reads this top to bottom, then follows
 - 2026-06-26: Improved setup/refresh/embed progress: model preparation is now
   visible before embedding batch counters, batch progress is labeled
   `Embedding chunks`, and completion summarizes embedded/unchanged/storage.
+- 2026-06-26: Improved `connect` discoverability: supported harnesses are typed
+  CLI values shown by `connect --help`, bare `connect`, and invalid harness
+  errors.
 - 2026-06-26: Distribution plan updated: `cargo install --git` and curl are
   quick installs, `dnlbox/homebrew-mycelia` is a staging tap, and Homebrew/core
   remains the desired permanent `brew install mycelia` path.

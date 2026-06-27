@@ -92,6 +92,48 @@ fn retired_corpus_command_points_to_new_verbs() {
 }
 
 #[test]
+fn connect_without_harness_lists_supported_values() {
+    let output = run(["connect"].as_slice());
+    assert!(
+        !output.status.success(),
+        "connect without a harness should fail"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(
+        stderr.contains("Supported harnesses:"),
+        "missing supported harness list:\n{stderr}"
+    );
+    assert!(stderr.contains("codex"), "missing codex harness:\n{stderr}");
+    assert!(
+        stderr.contains("claude-code"),
+        "missing claude-code harness:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("claude-desktop"),
+        "missing claude-desktop harness:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("cursor"),
+        "missing cursor harness:\n{stderr}"
+    );
+}
+
+#[test]
+fn connect_help_lists_supported_harnesses() {
+    let output = run(["connect", "--help"].as_slice());
+    assert!(output.status.success(), "connect help should succeed");
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(
+        stdout.contains("Supported harnesses:"),
+        "missing supported harness list:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("[possible values: codex, claude-code, claude-desktop, cursor]"),
+        "missing possible values:\n{stdout}"
+    );
+}
+
+#[test]
 fn routed_find_without_embeddings_falls_back_to_lexical() {
     let temp = TempDir::new().expect("tempdir");
     let root = temp.path().join("corpus");
