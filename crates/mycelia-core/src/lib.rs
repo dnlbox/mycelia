@@ -9,9 +9,10 @@ mod store;
 pub use embedding::EmbeddingProvider;
 pub use error::{Error, Result};
 pub use model::{
-    Chunk, ChunkRecord, CorpusStatusReport, EmbeddingReport, EvaluationCase, EvaluationCaseResult,
-    EvaluationReport, ExpectedMatch, IndexReport, RetrievalStrategy, Retrieved, SearchHeader,
-    SearchHit, SourceRefresh, SourceSpan, TokenUsageReport,
+    Chunk, ChunkRecord, CorpusStatusReport, Direction, EdgeDraft, EmbeddingReport, EvaluationCase,
+    EvaluationCaseResult, EvaluationReport, ExpectedMatch, IndexReport, RelatedHit,
+    RetrievalStrategy, Retrieved, SearchHeader, SearchHit, SourceRefresh, SourceSpan,
+    TokenUsageReport,
 };
 
 use std::path::Path;
@@ -47,6 +48,13 @@ pub(crate) fn is_identifier_token(token: &str) -> bool {
 /// Indexes one local corpus into a persistent database.
 pub fn index_corpus(root: &Path, database: &Path) -> Result<IndexReport> {
     store::index_corpus(root, database)
+}
+
+/// Forces a full re-index of a corpus, re-extracting even unchanged sources so a
+/// schema or extractor upgrade (such as the call graph) backfills. This is the
+/// re-index behind `mycelia refresh`.
+pub fn reindex_corpus(root: &Path, database: &Path) -> Result<IndexReport> {
+    store::reindex_corpus(root, database)
 }
 
 /// Finds chunks with the default reranked FTS5 retrieval strategy.
@@ -129,6 +137,20 @@ pub fn find_headers_with_embeddings(
 /// than outdated content. `None` means the identifier is absent from the index.
 pub fn retrieve(database: &Path, chunk_id: &str) -> Result<Option<Retrieved>> {
     store::retrieve(database, chunk_id)
+}
+
+/// Resolves `calls` relationships for a symbol against the current index. With
+/// `Direction::Callers`, returns the chunks that call `symbol`; with
+/// `Direction::Callees`, returns the definitions of the symbols `symbol` calls.
+/// Edges are resolved by name at query time, so results always reflect the
+/// current corpus. Names with no in-corpus definition are omitted, and an
+/// ambiguous name is returned with every candidate and `resolved = false`.
+pub fn find_relationships(
+    database: &Path,
+    symbol: &str,
+    direction: Direction,
+) -> Result<Vec<RelatedHit>> {
+    store::find_relationships(database, symbol, direction)
 }
 
 /// Reports which of the given source paths have drifted from the index on disk

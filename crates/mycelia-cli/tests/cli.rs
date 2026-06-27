@@ -254,6 +254,68 @@ fn index_find_and_retrieve_work_end_to_end() {
 }
 
 #[test]
+fn graph_command_reports_callers_and_callees() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path().join("corpus");
+    let database = temp.path().join("mycelia.sqlite");
+    fs::create_dir_all(&root).expect("create corpus");
+    // The callee is defined in one file and called from another: resolution is
+    // by name across the corpus.
+    write_file(
+        &root.join("util.rs"),
+        "pub fn helper() -> i32 {\n    42\n}\n",
+    );
+    write_file(&root.join("app.rs"), "fn run() -> i32 {\n    helper()\n}\n");
+    let database = database.to_str().expect("database path");
+
+    run_success(&[
+        "index",
+        root.to_str().expect("root path"),
+        "--database",
+        database,
+    ]);
+
+    let callers_json = run_success(&[
+        "graph",
+        "helper",
+        "--database",
+        database,
+        "--direction",
+        "callers",
+        "--json",
+    ]);
+    let hits: Value = serde_json::from_str(&callers_json).expect("parse callers json");
+    let callers = hits.as_array().expect("callers array");
+    assert_eq!(callers.len(), 1, "callers json:\n{callers_json}");
+    assert_eq!(callers[0]["symbol"], "run");
+    assert_eq!(callers[0]["resolved"], true);
+
+    let callees_text = run_success(&[
+        "graph",
+        "run",
+        "--database",
+        database,
+        "--direction",
+        "callees",
+    ]);
+    assert!(
+        callees_text.contains("symbol: helper"),
+        "callees output:\n{callees_text}"
+    );
+    assert!(
+        callees_text.contains("call site line:"),
+        "callees output:\n{callees_text}"
+    );
+
+    let empty = run_success(&["graph", "nonexistent_symbol", "--database", database]);
+    assert!(empty.contains("no callers found"), "empty output:\n{empty}");
+
+    let status = run_success(&["status", "--database", database]);
+    assert!(status.contains("graph:"), "status output:\n{status}");
+    assert!(status.contains("edges over"), "status output:\n{status}");
+}
+
+#[test]
 fn retrieve_without_chunk_id_returns_clear_error() {
     let temp = TempDir::new().expect("tempdir");
     let database = temp.path().join("mycelia.sqlite");

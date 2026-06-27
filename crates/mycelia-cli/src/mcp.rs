@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use mycelia_core::{RetrievalStrategy, Retrieved, SearchHeader};
+use mycelia_core::{Direction, RelatedHit, RetrievalStrategy, Retrieved, SearchHeader};
 use rmcp::{
     ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -42,6 +42,22 @@ struct RetrieveRequest {
         description = "Namespaced chunk identifier returned by Mycelia, for example corpus:hash"
     )]
     chunk_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct FindRelatedRequest {
+    #[schemars(description = "The symbol (function, struct, type, ...) to map relationships for")]
+    symbol: String,
+    #[serde(default)]
+    #[schemars(
+        description = "Relationship direction: 'callers' (chunks that call the symbol) or 'callees' (definitions the symbol calls). Defaults to callers."
+    )]
+    direction: Option<String>,
+    #[serde(default)]
+    #[schemars(
+        description = "Optional corpus name. Use only when the user explicitly names another project."
+    )]
+    corpus: Option<String>,
 }
 
 const SERVER_INSTRUCTIONS: &str = "Mycelia is the token-efficient orientation path for the current project corpus. For questions like where something is implemented, what supports a feature or language, which files touch an area, or which symbol defines behavior, call find first. Pass corpus only when the user explicitly names another project. Use retrieve only for the selected chunk ids that look relevant. Shell grep/read remain useful follow-up tools for exact line edits after Mycelia has narrowed the search.";
@@ -346,6 +362,24 @@ impl MyceliaServer {
     }
 
     #[tool(
+        description = "Map deterministic `calls` relationships for a code symbol: its callers (chunks that call it) or its callees (definitions it calls). Use for structural questions grep cannot answer cheaply, such as who calls X or what X depends on. Each result is a sourced definition header with a namespaced chunk id and the call site; an ambiguous name is returned with every candidate and resolved=false rather than guessing. Pass corpus only when the user names another project."
+    )]
+    fn find_related(
+        &self,
+        Parameters(request): Parameters<FindRelatedRequest>,
+    ) -> McpToolResult<String> {
+        let direction = parse_direction(request.direction.as_deref())?;
+        let resolved = match self.resolve_corpus(request.corpus.as_deref()) {
+            Ok(resolved) => resolved,
+            Err(error) => return resolve_failure_json(self, error),
+        };
+        let hits = mycelia_core::find_relationships(&resolved.database, &request.symbol, direction)
+            .map_err(|error| error.to_string())?;
+        let value = related_json(&hits, direction, &request.symbol, resolved.name.as_deref());
+        serde_json::to_string(&value).map_err(|error| error.to_string())
+    }
+
+    #[tool(
         description = "List registered Mycelia corpora. Use only when a request names another project ambiguously or Mycelia returns needs_corpus."
     )]
     fn list_corpora(&self) -> McpToolResult<String> {
@@ -486,6 +520,63 @@ fn headers_json(headers: &[SearchHeader], corpus: Option<&str>) -> serde_json::V
     value
 }
 
+fn parse_direction(value: Option<&str>) -> McpToolResult<Direction> {
+    match value {
+        None => Ok(Direction::Callers),
+        Some(raw) => match raw.to_ascii_lowercase().as_str() {
+            "callers" => Ok(Direction::Callers),
+            "callees" => Ok(Direction::Callees),
+            other => Err(format!(
+                "unknown direction {other:?}; use 'callers' or 'callees'"
+            )),
+        },
+    }
+}
+
+/// Serializes relationship hits, namespacing each definition's `chunk_id` with
+/// the corpus so the model can retrieve it, and wrapping them with the query
+/// symbol and direction so the response is self-describing.
+fn related_json(
+    hits: &[RelatedHit],
+    direction: Direction,
+    symbol: &str,
+    corpus: Option<&str>,
+) -> serde_json::Value {
+    let mut items = serde_json::to_value(hits).unwrap_or_else(|_| serde_json::json!([]));
+    if let Some(corpus) = corpus
+        && let Some(array) = items.as_array_mut()
+    {
+        for item in array {
+            let Some(object) = item.as_object_mut() else {
+                continue;
+            };
+            let Some(definition) = object
+                .get_mut("definition")
+                .and_then(|value| value.as_object_mut())
+            else {
+                continue;
+            };
+            let Some(raw_id) = definition
+                .get("chunk_id")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned)
+            else {
+                continue;
+            };
+            definition.insert(
+                "chunk_id".to_owned(),
+                serde_json::Value::String(format!("{corpus}:{raw_id}")),
+            );
+        }
+    }
+    serde_json::json!({
+        "symbol": symbol,
+        "direction": direction.as_str(),
+        "corpus": corpus,
+        "relationships": items,
+    })
+}
+
 fn resolve_failure_json(server: &MyceliaServer, error: ResolveFailure) -> McpToolResult<String> {
     match error {
         ResolveFailure::Message(message) => Err(message),
@@ -545,6 +636,43 @@ mod tests {
         assert!(output.contains("\"source_path\":\"notes.txt\""));
         assert!(output.contains("\"chunk_id\""));
         assert!(!output.contains("\"text\""));
+    }
+
+    #[test]
+    fn find_related_returns_sourced_callers() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("corpus");
+        let database = temp.path().join("mycelia.sqlite3");
+        fs::create_dir_all(&root).expect("create corpus");
+        fs::write(
+            root.join("util.rs"),
+            "pub fn helper() -> i32 {\n    42\n}\n",
+        )
+        .expect("write util");
+        fs::write(root.join("app.rs"), "fn run() -> i32 {\n    helper()\n}\n").expect("write app");
+        mycelia_core::index_corpus(&root, &database).expect("index corpus");
+        let server = MyceliaServer::new(ServerTarget::Database { database }, None);
+
+        let output = server
+            .find_related(Parameters(FindRelatedRequest {
+                symbol: "helper".to_owned(),
+                direction: Some("callers".to_owned()),
+                corpus: None,
+            }))
+            .expect("find_related");
+
+        assert!(output.contains("\"direction\":\"callers\""), "{output}");
+        assert!(output.contains("\"symbol\":\"run\""), "{output}");
+        assert!(output.contains("\"resolved\":true"), "{output}");
+
+        let error = server
+            .find_related(Parameters(FindRelatedRequest {
+                symbol: "helper".to_owned(),
+                direction: Some("sideways".to_owned()),
+                corpus: None,
+            }))
+            .expect_err("invalid direction");
+        assert!(error.contains("unknown direction"), "{error}");
     }
 
     #[test]

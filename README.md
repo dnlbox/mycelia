@@ -23,7 +23,9 @@ The shipped baseline includes:
 - named corpus profiles with derived local database paths
 - manifest-driven retrieval evaluation with token-per-answer estimates
 - a read-only multi-corpus stdio MCP server exposing `find`, aliases,
-  `retrieve`, and `list_corpora`
+  `retrieve`, `find_related`, and `list_corpora`
+- a deterministic depth-1 Rust `calls` graph: `graph` CLI command and
+  `find_related` MCP tool, with conservative query-time name resolution
 - query-time freshness validation plus MCP self-heal for drifted sources
 - journey commands: `setup`, `connect`, `stats`, `status`, `refresh`, `list`,
   and `delete`
@@ -144,6 +146,7 @@ mycelia index <root> --database <path>
 mycelia embed --database <path>
 mycelia find <query> --database <path> [--strategy substring|fts5|fts5-reranked|vector|hybrid|routed]
 mycelia retrieve <chunk_id> --database <path>
+mycelia graph <symbol> --database <path> [--direction callers|callees]
 mycelia eval <manifest> --database <path> [--strategy substring|fts5|fts5-reranked|vector|hybrid|routed]
 mycelia serve --database <path> [--lexical]
 ```
@@ -163,6 +166,7 @@ are:
 - `search_codebase`: alias for `find`
 - `locate_implementation`: alias for `find`
 - `retrieve`: one selected chunk body by namespaced `corpus:hash` `chunk_id`
+- `find_related`: callers or callees of a code symbol over the `calls` graph
 - `list_corpora`: registered corpus names and roots for disambiguation
 
 `find` does not return chunk bodies. A header includes path, byte range, line
@@ -216,8 +220,9 @@ ordering is:
    the token-per-answer gate holds.
 2. Add a debounced watcher as a latency optimization for keeping embeddings
    current after query-time self-heal.
-3. Add typed graph edges only where measured queries prove flat retrieval cannot
-   answer the relationship.
+3. Extend the typed-edge graph (`23`): edges for TypeScript, Python, and Ruby;
+   `imports`/`implements` edge types; method-call resolution via type
+   information; and traversal beyond depth-1.
 4. Add federation and specialized vector or storage layers only after local
    measurements justify them.
 

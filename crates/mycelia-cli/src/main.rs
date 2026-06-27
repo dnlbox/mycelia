@@ -5,8 +5,8 @@ mod semantic;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use mycelia_core::{
-    self, ChunkRecord, EmbeddingReport, EvaluationCase, EvaluationReport, IndexReport,
-    RetrievalStrategy, Retrieved, SearchHeader,
+    self, ChunkRecord, Direction, EmbeddingReport, EvaluationCase, EvaluationReport, IndexReport,
+    RelatedHit, RetrievalStrategy, Retrieved, SearchHeader,
 };
 use serde::Deserialize;
 use std::fs;
@@ -49,6 +49,24 @@ impl From<Strategy> for RetrievalStrategy {
 impl Strategy {
     fn uses_embeddings(self) -> bool {
         matches!(self, Self::Vector | Self::Hybrid | Self::Routed)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum GraphDirection {
+    /// Chunks that call the symbol.
+    #[default]
+    Callers,
+    /// Definitions of the symbols the symbol calls.
+    Callees,
+}
+
+impl From<GraphDirection> for Direction {
+    fn from(direction: GraphDirection) -> Self {
+        match direction {
+            GraphDirection::Callers => Self::Callers,
+            GraphDirection::Callees => Self::Callees,
+        }
     }
 }
 
@@ -155,6 +173,16 @@ enum Command {
         chunk_id: Option<String>,
         #[command(flatten)]
         target: AnyTarget,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show `calls` relationships for a symbol: its callers or its callees.
+    Graph {
+        symbol: String,
+        #[command(flatten)]
+        target: AnyTarget,
+        #[arg(long, value_enum, default_value_t)]
+        direction: GraphDirection,
         #[arg(long)]
         json: bool,
     },
@@ -427,6 +455,23 @@ where
                 serde_json::to_string(&outcome).map_err(|e| e.to_string())?
             } else {
                 format_retrieved(&outcome)
+            });
+            Ok(())
+        }
+
+        Command::Graph {
+            symbol,
+            target,
+            direction,
+            json,
+        } => {
+            let resolved = target.resolve()?;
+            let hits = mycelia_core::find_relationships(&resolved.database, &symbol, direction.into())
+                .map_err(|e| e.to_string())?;
+            emit_output(if json {
+                serde_json::to_string(&hits).map_err(|e| e.to_string())?
+            } else {
+                format_related_hits(&symbol, direction, &hits)
             });
             Ok(())
         }
@@ -865,9 +910,19 @@ fn cmd_status(target: CwdTarget) -> Result<()> {
 
     let db_size = format_bytes(db_stats.db_size_bytes);
 
+    let graph_line = if db_stats.chunk_count > 0 && db_stats.symbol_count == 0 {
+        "none, run `mycelia refresh` to populate the call graph".to_string()
+    } else {
+        format!(
+            "{} edges over {} symbols",
+            db_stats.edge_count, db_stats.symbol_count
+        )
+    };
+
     println!("corpus:            {corpus_name}");
     println!("index:             {} chunks", db_stats.chunk_count);
     println!("embeddings:        {embedding_line}");
+    println!("graph:             {graph_line}");
     println!("last serve:        {last_serve}");
     println!("last refresh:      {last_refresh}");
     println!("db size:           {db_size}");
@@ -885,7 +940,7 @@ fn cmd_refresh(target: CwdTarget) -> Result<()> {
     eprintln!("Refreshing corpus '{corpus_name}'...");
     eprintln!("Indexing...");
     let report =
-        mycelia_core::index_corpus(&root, &resolved.database).map_err(|e| e.to_string())?;
+        mycelia_core::reindex_corpus(&root, &resolved.database).map_err(|e| e.to_string())?;
     eprintln!(
         "  {} chunks from {} files ({} removed, {} rejected)",
         report.chunks_written, report.indexed, report.removed, report.rejected
@@ -1159,6 +1214,42 @@ fn format_search_header(header: &SearchHeader) -> String {
     }
 
     lines.push(format!("synopsis: {}", header.synopsis));
+    lines.join("\n")
+}
+
+fn format_related_hits(symbol: &str, direction: GraphDirection, hits: &[RelatedHit]) -> String {
+    if hits.is_empty() {
+        return match direction {
+            GraphDirection::Callers => format!("no callers found for {symbol}"),
+            GraphDirection::Callees => format!("no callees found for {symbol}"),
+        };
+    }
+    hits.iter()
+        .map(format_related_hit)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn format_related_hit(hit: &RelatedHit) -> String {
+    let mut lines = vec![
+        format!("symbol: {}", hit.symbol),
+        format!("id: {}", hit.definition.chunk_id),
+        format!("path: {}", hit.definition.source_path),
+        format!(
+            "line range: {}..{}",
+            hit.definition.span.line_start, hit.definition.span.line_end
+        ),
+        format!("call site line: {}", hit.call_site.line_start),
+    ];
+    if let Some(signature) = &hit.definition.signature {
+        lines.push(format!("signature: {signature}"));
+    }
+    if !hit.resolved {
+        lines.push(format!(
+            "ambiguous: name resolves to {} definitions",
+            hit.definition_count
+        ));
+    }
     lines.join("\n")
 }
 

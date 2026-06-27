@@ -8,6 +8,27 @@ pub struct SourceSpan {
     pub line_end: usize,
 }
 
+/// The edge type for a `calls` relationship. Edge types are stored as text in
+/// the `edges` table; this mirrors the `&'static str` extractor convention so a
+/// new edge type is a constant, not an enum migration.
+pub const EDGE_TYPE_CALLS: &str = "calls";
+
+/// Extraction-time confidence for a deterministic tree-sitter edge. Query-time
+/// ambiguity (a callee name resolving to several definitions) is computed at
+/// resolution, not stored.
+pub const EDGE_CONFIDENCE_EXTRACTED: &str = "EXTRACTED";
+
+/// A typed edge collected during extraction, addressed by the callee's bare
+/// name (`dst_symbol`). Resolution to a defining chunk happens at query time
+/// against the current symbol index. `span` is the call site inside the owning
+/// chunk, so the relationship is sourced.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EdgeDraft {
+    pub edge_type: &'static str,
+    pub dst_symbol: String,
+    pub span: SourceSpan,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Chunk {
     pub id: String,
@@ -16,6 +37,11 @@ pub struct Chunk {
     pub span: SourceSpan,
     pub text: String,
     pub extractor: &'static str,
+    /// The defined symbol name for a code chunk; `None` for plain text and for
+    /// languages without edge extraction yet.
+    pub symbol: Option<String>,
+    /// Typed edges originating in this chunk (currently Rust `calls` only).
+    pub edges: Vec<EdgeDraft>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -26,6 +52,8 @@ pub struct ChunkRecord {
     pub span: SourceSpan,
     pub text: String,
     pub extractor: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
 }
 
 /// Outcome of a freshness-validated `retrieve`. Precision over caching: the
@@ -129,6 +157,40 @@ impl std::fmt::Display for RetrievalStrategy {
     }
 }
 
+/// Direction of a relationship query over `calls` edges. `Callers` finds the
+/// chunks that call the queried symbol; `Callees` finds the chunks the queried
+/// symbol calls.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Direction {
+    Callers,
+    Callees,
+}
+
+impl Direction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Callers => "callers",
+            Self::Callees => "callees",
+        }
+    }
+}
+
+/// One sourced relationship. `definition` is the related chunk (the caller for a
+/// callers query, the callee's definition for a callees query); `call_site` is
+/// where the call appears, so the relationship is verifiable. `resolved` is true
+/// only when the name maps to exactly one in-corpus definition: per the north
+/// star "a wrong connection is worse than none", an ambiguous name is surfaced
+/// with every candidate and `resolved = false`, never silently collapsed.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct RelatedHit {
+    pub symbol: String,
+    pub definition: SearchHeader,
+    pub call_site: SourceSpan,
+    pub resolved: bool,
+    pub definition_count: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SearchHit {
     #[serde(flatten)]
@@ -151,14 +213,20 @@ pub struct SearchHeader {
 
 impl SearchHeader {
     pub fn from_hit(hit: &SearchHit) -> Self {
-        let (signature, synopsis) = distill_header(&hit.chunk);
+        Self::from_record(&hit.chunk, hit.score)
+    }
+
+    /// Distil a header from a record directly, for paths that carry no ranking
+    /// score (such as graph relationship results).
+    pub fn from_record(chunk: &ChunkRecord, score: f64) -> Self {
+        let (signature, synopsis) = distill_header(chunk);
         Self {
-            chunk_id: hit.chunk.id.clone(),
-            source_path: hit.chunk.source_path.clone(),
-            source_hash: hit.chunk.source_hash.clone(),
-            span: hit.chunk.span.clone(),
-            extractor: hit.chunk.extractor.clone(),
-            score: hit.score,
+            chunk_id: chunk.id.clone(),
+            source_path: chunk.source_path.clone(),
+            source_hash: chunk.source_hash.clone(),
+            span: chunk.span.clone(),
+            extractor: chunk.extractor.clone(),
+            score,
             signature,
             synopsis,
         }
@@ -251,6 +319,11 @@ pub struct CorpusStatusReport {
     pub embedding_count: usize,
     pub embedding_model: Option<String>,
     pub db_size_bytes: u64,
+    /// Chunks carrying a defined symbol name. Zero on a corpus indexed before the
+    /// graph migration, signalling that a `refresh` is needed to populate it.
+    pub symbol_count: usize,
+    /// Typed `calls` edges stored across the corpus.
+    pub edge_count: usize,
 }
 
 fn distill_header(chunk: &ChunkRecord) -> (Option<String>, String) {
@@ -415,6 +488,7 @@ mod tests {
                 },
                 text: text.to_owned(),
                 extractor: extractor.to_owned(),
+                symbol: None,
             },
             score: 1.5,
         }

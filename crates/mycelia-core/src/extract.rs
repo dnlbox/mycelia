@@ -1,4 +1,5 @@
-use crate::{Chunk, SourceSpan};
+use crate::model::EDGE_TYPE_CALLS;
+use crate::{Chunk, EdgeDraft, SourceSpan};
 
 const MAX_CHUNK_BYTES: usize = 2_048;
 const EXTRACTOR_PLAIN: &str = "plain-text-v1";
@@ -159,6 +160,9 @@ fn extract_rust(source_path: &str, source_hash: &str, text: &str) -> Option<Vec<
         let byte_start = doc_byte_start;
         let byte_end = node.end_byte();
 
+        let mut edges = Vec::new();
+        collect_rust_calls(*node, text, &line_index, &mut edges);
+
         chunks.push(Chunk {
             id: chunk_id(source_path, source_hash, byte_start, byte_end),
             source_path: source_path.to_owned(),
@@ -171,6 +175,8 @@ fn extract_rust(source_path: &str, source_hash: &str, text: &str) -> Option<Vec<
             },
             text: text[byte_start..byte_end].to_owned(),
             extractor: EXTRACTOR_RUST,
+            symbol: rust_symbol_name(*node, text),
+            edges,
         });
     }
 
@@ -178,6 +184,87 @@ fn extract_rust(source_path: &str, source_hash: &str, text: &str) -> Option<Vec<
         return None;
     }
     Some(chunks)
+}
+
+/// The defined symbol name for a top-level Rust item. `impl` blocks have no
+/// `name` field, so they are keyed by the bare type being implemented.
+fn rust_symbol_name(node: tree_sitter::Node<'_>, text: &str) -> Option<String> {
+    if node.kind() == "impl_item" {
+        let type_node = node.child_by_field_name("type")?;
+        let raw = &text[type_node.byte_range()];
+        let bare = raw.split('<').next().unwrap_or(raw).trim();
+        return (!bare.is_empty()).then(|| bare.to_owned());
+    }
+    let name = node.child_by_field_name("name")?;
+    Some(text[name.byte_range()].to_owned())
+}
+
+/// Collects `calls` edges from one top-level Rust item by walking its subtree for
+/// call and macro-invocation sites. Each edge is addressed by the callee's bare
+/// name and carries the call-site span as provenance. Resolution to a defining
+/// chunk is deferred to query time; names with no in-corpus definition (std
+/// functions, external macros) simply resolve to nothing and are dropped there.
+/// tree-sitter never parses identifiers inside comments or string literals as
+/// calls, so this cannot manufacture an edge from prose.
+fn collect_rust_calls(
+    node: tree_sitter::Node<'_>,
+    text: &str,
+    line_index: &LineIndex,
+    edges: &mut Vec<EdgeDraft>,
+) {
+    let callee = match node.kind() {
+        "call_expression" => node.child_by_field_name("function"),
+        "macro_invocation" => node.child_by_field_name("macro"),
+        _ => None,
+    };
+    if let Some(callee) = callee
+        && let Some((name, name_node)) = rust_callee_name(callee, text)
+    {
+        let byte_start = name_node.start_byte();
+        let byte_end = name_node.end_byte();
+        edges.push(EdgeDraft {
+            edge_type: EDGE_TYPE_CALLS,
+            dst_symbol: name,
+            span: SourceSpan {
+                byte_start,
+                byte_end,
+                line_start: line_index.line_at_start(byte_start),
+                line_end: line_index.line_at_end(text, byte_end),
+            },
+        });
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_rust_calls(child, text, line_index, edges);
+    }
+}
+
+/// Extracts the bare callee name and the identifier node to source it from, for
+/// the `function`/`macro` position of a call. Only free-function calls
+/// (`foo()`), path calls (`module::foo()`, final segment), and macro
+/// invocations are captured. Method calls (`receiver.foo()`) are deliberately
+/// dropped: the receiver type is unknown, so the bare method name would
+/// misresolve to an unrelated free function of the same name (e.g. `row.get()`
+/// to a `get` function). Per "a wrong connection is worse than none", a method
+/// edge needs type resolution and is deferred. Resolving method calls is a
+/// follow-up that needs type information.
+fn rust_callee_name<'tree>(
+    func: tree_sitter::Node<'tree>,
+    text: &str,
+) -> Option<(String, tree_sitter::Node<'tree>)> {
+    match func.kind() {
+        "identifier" => Some((text[func.byte_range()].to_owned(), func)),
+        "scoped_identifier" => {
+            let name = func.child_by_field_name("name")?;
+            Some((text[name.byte_range()].to_owned(), name))
+        }
+        "generic_function" => {
+            let inner = func.child_by_field_name("function")?;
+            rust_callee_name(inner, text)
+        }
+        _ => None,
+    }
 }
 
 fn extract_typescript(
@@ -239,6 +326,8 @@ fn extract_typescript(
             },
             text: text[byte_start..byte_end].to_owned(),
             extractor,
+            symbol: None,
+            edges: Vec::new(),
         });
     }
 
@@ -282,6 +371,8 @@ fn extract_python(source_path: &str, source_hash: &str, text: &str) -> Option<Ve
             },
             text: text[byte_start..byte_end].to_owned(),
             extractor: EXTRACTOR_PY,
+            symbol: None,
+            edges: Vec::new(),
         });
     }
 
@@ -346,6 +437,8 @@ fn extract_ruby(source_path: &str, source_hash: &str, text: &str) -> Option<Vec<
             },
             text: text[byte_start..byte_end].to_owned(),
             extractor: EXTRACTOR_RUBY,
+            symbol: None,
+            edges: Vec::new(),
         });
     }
 
@@ -372,6 +465,8 @@ fn extract_plain_text(source_path: &str, source_hash: &str, text: &str) -> Vec<C
             },
             text: text[byte_start..byte_end].to_owned(),
             extractor: EXTRACTOR_PLAIN,
+            symbol: None,
+            edges: Vec::new(),
         })
         .collect()
 }
@@ -711,6 +806,108 @@ trait Shape {
         let (first, _) = extract_text("a.rs", "hash", src);
         let (second, _) = extract_text("a.rs", "hash", src);
         assert_eq!(first[0].id, second[0].id);
+    }
+
+    // --- Rust symbol identity and `calls` edges ---
+
+    /// Collects every `calls` edge target across the chunks, for assertions.
+    fn call_targets(chunks: &[Chunk]) -> Vec<&str> {
+        chunks
+            .iter()
+            .flat_map(|chunk| chunk.edges.iter())
+            .map(|edge| edge.dst_symbol.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn rust_chunks_carry_their_symbol_name() {
+        let src = r#"fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+struct Point { x: f64 }
+
+impl Point {
+    fn origin() -> Self { Point { x: 0.0 } }
+}
+"#;
+        let (chunks, _) = extract_text("lib.rs", "hash", src);
+        let symbols: Vec<Option<&str>> = chunks.iter().map(|c| c.symbol.as_deref()).collect();
+        assert_eq!(symbols, vec![Some("add"), Some("Point"), Some("Point")]);
+    }
+
+    #[test]
+    fn rust_collects_free_function_call_edges() {
+        let src = r#"fn helper() -> i32 {
+    42
+}
+
+fn caller() -> i32 {
+    helper() + helper()
+}
+"#;
+        let (chunks, _) = extract_text("lib.rs", "hash", src);
+        // `caller` calls `helper` twice; one edge per call site.
+        let caller = chunks
+            .iter()
+            .find(|c| c.symbol.as_deref() == Some("caller"))
+            .unwrap();
+        let targets: Vec<&str> = caller.edges.iter().map(|e| e.dst_symbol.as_str()).collect();
+        assert_eq!(targets, vec!["helper", "helper"]);
+        // Each edge is sourced at the call site, not the whole function.
+        assert!(
+            caller
+                .edges
+                .iter()
+                .all(|e| e.span.byte_start >= caller.span.byte_start)
+        );
+        assert_eq!(caller.edges[0].edge_type, EDGE_TYPE_CALLS);
+    }
+
+    #[test]
+    fn rust_path_call_uses_final_segment() {
+        let src = r#"fn run() {
+    module::do_work();
+    Type::associated();
+}
+"#;
+        let (chunks, _) = extract_text("lib.rs", "hash", src);
+        assert_eq!(call_targets(&chunks), vec!["do_work", "associated"]);
+    }
+
+    #[test]
+    fn rust_method_call_is_not_an_edge() {
+        // Method calls are dropped: the receiver type is unknown, so a bare
+        // method name would misresolve to an unrelated free function. `helper`
+        // (a free call) is still captured; `process` (a method) is not.
+        let src = r#"fn run(value: Thing) {
+    helper();
+    value.process();
+}
+"#;
+        let (chunks, _) = extract_text("lib.rs", "hash", src);
+        assert_eq!(call_targets(&chunks), vec!["helper"]);
+    }
+
+    #[test]
+    fn rust_macro_invocation_is_a_call_edge() {
+        let src = r#"fn run() {
+    log_event!();
+}
+"#;
+        let (chunks, _) = extract_text("lib.rs", "hash", src);
+        assert_eq!(call_targets(&chunks), vec!["log_event"]);
+    }
+
+    #[test]
+    fn rust_no_false_edge_from_comment_or_string() {
+        let src = r#"fn run() {
+    // ghost() is only a comment
+    let _ = "phantom()";
+}
+"#;
+        let (chunks, _) = extract_text("lib.rs", "hash", src);
+        assert!(call_targets(&chunks).is_empty());
     }
 
     #[test]

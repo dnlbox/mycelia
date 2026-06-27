@@ -97,8 +97,13 @@ per answered query (`10`), and a precision-first hybrid re-measured over clean
 chunks (`11`) are now in place. A local no-cost Graphify bakeoff (`12`) found
 Graphify's AST graph valuable but not stronger than Mycelia on the code-only
 structural gate; full-corpus Graphify evaluation requires explicit backend and
-model-spend approval. Typed graph edges, MCP mutation tools, watchers, federation,
-and specialized performance storage are deferred.
+model-spend approval. A first typed-edge slice (`23`) adds a deterministic,
+sourced, depth-1 Rust `calls` graph: `chunks.symbol` identity, an `edges` table
+addressed by callee name with query-time resolution, a read-only `graph` CLI
+command, and one parameterized `find_related` MCP tool (callers/callees).
+TypeScript/Python/Ruby edges, other edge types, method-call resolution, INFERRED
+edges, MCP mutation tools, watchers, federation, and specialized performance
+storage are deferred.
 
 ### Toolchain
 
@@ -132,6 +137,10 @@ Run these gates in order:
 9. For the semantic probe, compare lexical, vector, and hybrid retrieval on the
    unchanged Forge manifest plus the paraphrase cohort, and record embedding
    build time, refresh time, query latency, model identity, and storage size.
+10. For graph changes, exercise `graph <symbol> --direction callers|callees`
+    through the built binary against a freshly indexed corpus and confirm the
+    relationships are sourced and free of false edges; re-run the retrieval eval
+    to confirm the additive schema does not regress the token-per-answer gate.
 
 ### Stack-specific rules
 
@@ -188,6 +197,28 @@ Run these gates in order:
   last-resort `refresh_hint`. The filesystem is the single source of truth, so
   `find` and `retrieve` validate against it and must not contradict. Do not expose
   a "stale" flag on `find` headers: a re-ranked header is simply accurate.
+
+#### Typed graph edges (slice `23`)
+
+- Store edges by callee name (`dst_symbol`), not a resolved target id, and
+  resolve to a defining chunk at query time against the current symbol index.
+  This keeps edges correct under incremental and partial reindex.
+- Resolve conservatively, honouring "a wrong connection is worse than none": drop
+  a name with no in-corpus definition, return every candidate of an ambiguous
+  name with `resolved = false`, and never silently pick one. Do not extract
+  method calls (`receiver.method()`); the receiver type is unknown, so the bare
+  name would misresolve. Free-function, path, and macro calls only.
+- Do not bump the extractor identifier for symbol/edge additions: chunk
+  boundaries are unchanged, so embeddings stay valid. Existing corpora backfill
+  the graph on the next forced `refresh`.
+- `refresh` is a genuine forced full re-index (`reindex_corpus`), re-extracting
+  even unchanged sources so schema-only upgrades (like the graph) backfill.
+- A read open upgrades an out-of-date database schema in place so reads never
+  fail on a newly added column; this upgrades an existing corpus, it does not
+  create or repopulate one.
+- Keep the graph surface to one parameterized `find_related` MCP tool, not
+  several, so tool count does not feed the harness tool-search deferral (`22`).
+
 #### Observability (slice `19`)
 
 - Write one structured log line per meaningful event to

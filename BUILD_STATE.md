@@ -5,7 +5,39 @@ Agent working area. A fresh session reads this top to bottom, then follows
 
 ## Now
 
-- Latest slice: duplicate-body header compaction SHIPPED for ranked retrieval.
+- Latest slice: typed graph edges, first vertical SHIPPED
+  (`docs/concept/23_typed_graph_edges.md`). Deterministic depth-1 Rust `calls`
+  graph.
+- Implemented: migration 005 adds `chunks.symbol` (indexed) and an `edges` table
+  addressed by callee name with `ON DELETE CASCADE` (edges die with their chunk
+  on reindex). `extract_rust` populates the symbol and collects `calls` edges
+  from free-function, path, and macro sites; method calls are dropped (receiver
+  type unknown, would misresolve). Core `find_relationships(symbol, direction)`
+  resolves callee names at query time: unique name -> resolved, ambiguous name ->
+  every candidate with `resolved=false`, external/no-def -> dropped in both
+  callers and callees directions. Surfaced via read-only CLI `graph <symbol>
+  --direction callers|callees` and one parameterized `find_related` MCP tool.
+  `status` reports graph coverage.
+- Implemented (correctness fixes the graph exposed): `refresh` now does a genuine
+  forced full re-index (`reindex_corpus`) so the graph backfills onto unchanged
+  corpora; a read open upgrades an out-of-date schema in place so an existing v4
+  corpus does not fail `find` on the new `symbol` column.
+- Validation: fmt, clippy, 116 tests (86 core, 16 CLI, 14 bin); release build;
+  release-binary fixture graph check confirms external names like `println` are
+  omitted; real stdio MCP exchange lists `find`/`retrieve`/`find_related`, calls
+  `find_related`, and exits cleanly; isolated `setup`/`status`/`graph`/`connect
+  codex` passed. Release-binary live graph check on the self-indexed repo (callers of
+  `chunk_record_from_row` = `find_fts5_candidates` + `relationship_callers`;
+  callees = sourced `row_i64_to_usize` calls, no false `get` edge). Fresh
+  release-binary Forge refresh produced 12552 chunks, 12552 embeddings, and 2763
+  graph edges over 479 symbols. Current 68-case eval: routed 50/68 (baseline
+  36/40 @ 1212.4 tokens/answer, expanded 13/18 @ 1941.7, paraphrase 1/10 @
+  709.0; weighted aggregate 1391.9). fts5-reranked is 48/68 at weighted 1395.9,
+  so routed remains slightly ahead on the refreshed corpus.
+- NEXT SLICE: extend the graph (TS/Python/Ruby edges, `imports`/`implements`,
+  method-call resolution via type info, traversal beyond depth-1), or return to
+  retrieval-quality work on the remaining eval misses under the token gate.
+- Previous slice: duplicate-body header compaction SHIPPED for ranked retrieval.
 - Implemented: `fts5-reranked` and routed final headers collapse exact duplicate
   chunk bodies after scoring, keeping the first ranked copy and filling the
   result budget with the next distinct candidate. This prevents cloned
@@ -14,11 +46,12 @@ Agent working area. A fresh session reads this top to bottom, then follows
   an established baseline hit and worsened tokens per answer, so it did not meet
   the slice gate.
 - Validation: focused duplicate regression, fmt, clippy, full workspace tests,
-  release build, release-binary Forge refresh, and 68-case eval pass. Current
-  measured gate after final protocol-text refresh: routed 52/68
-  (baseline 37/40 @ 1076.4 tokens/answer, expanded 13/18 @ 1939.0,
-  paraphrase 2/10 @ 651.5; weighted aggregate 1275.7). fts5-reranked is 48/68 at
-  weighted 1302.1.
+  release build, release-binary Forge refresh, and 68-case eval pass. The graph
+  closeout refresh on 2026-06-27 remeasured the current corpus at routed 50/68
+  (baseline 36/40 @ 1212.4 tokens/answer, expanded 13/18 @ 1941.7,
+  paraphrase 1/10 @ 709.0; weighted aggregate 1391.9). fts5-reranked is 48/68 at
+  weighted 1395.9. This replaces the prior stale 52/68 note for the refreshed
+  Forge corpus; no retrieval default changes are justified by this graph slice.
 - Previous slice: refreshed Forge gate drift DIAGNOSED and repaired.
 - Root cause: `fixtures/eval/*.json` oracle manifests were being indexed into
   the Forge corpus, so query text and expected source paths could outrank the
@@ -45,9 +78,8 @@ Agent working area. A fresh session reads this top to bottom, then follows
 - NEXT SLICE: optional retrieval-quality work can target the remaining 17 misses,
   but only with the same token-per-answer gate. No default change is justified by
   this repair slice alone.
-- Parallel context: Ruby tree-sitter extraction support is present in the
-  current dirty tree from the adjacent Claude Desktop run and passed the full
-  workspace test suite.
+- Parallel context: Ruby tree-sitter extraction support shipped in `e115f1d`
+  and passed the full workspace test suite.
 - Milestone: slice `21` distribution readiness SHIPPED. AGENTS.md and concept
   `21` are reconciled to cargo/curl quick installs, tap staging, and official
   Homebrew/core later.
@@ -66,7 +98,7 @@ Agent working area. A fresh session reads this top to bottom, then follows
   audit waits for the separate formula submission.
 - Corpus: refreshed `forge` is 12,482 chunks, 12,482 embeddings, model
   `fastembed-5.17.2:BAAI/bge-small-en-v1.5`, db size 51.3 MB.
-- Eval (68-case, refreshed Forge): routed default 51/68 on the current tree
+- Eval at slice closeout (68-case, refreshed Forge): routed default 51/68
   (baseline 36/40 @ 1069.9 tokens/answer, expanded 13/18 @ 1939.8,
   paraphrase 2/10 @ 651.5; weighted aggregate 1275.3 tokens/answer).
   fts5-reranked is 47/68 at weighted 1302.2 tokens/answer.
@@ -194,13 +226,39 @@ Agent working area. A fresh session reads this top to bottom, then follows
   first ranked copy wins, and the next distinct candidate fills the result set.
   Reject source-path token weighting for now because it traded away established
   hits and worsened tokens per answer.
+- 2026-06-27: Build the first typed-edge slice (concept `23`) as a deterministic
+  depth-1 Rust `calls` graph. Store edges by callee name, resolve at query time
+  (correct under incremental reindex). Conservative per "a wrong connection is
+  worse than none": drop external names, flag ambiguous names with every
+  candidate, and drop method calls entirely (verification caught `row.get()`
+  misresolving to `profile::get`). No extractor-id bump (boundaries unchanged).
+  One parameterized `find_related` MCP tool, not several, per the `22`
+  tool-count/deferral lesson. User approved MCP exposure in this slice.
+- 2026-06-27 (REVERSES the read-never-migrates stance, flagged for review): a
+  read open upgrades an out-of-date database schema in place. Adding `symbol` to
+  the shared chunk SELECT coupled `find`/`retrieve` to v5, so an existing v4
+  corpus would fail on a missing column; reads now migrate the schema (additive,
+  no repopulation) so existing corpora keep working. Consistent with the
+  approved precedent that the server maintains its own bound index as upkeep.
+  Paired with making `refresh` a genuine forced re-index so the graph backfills.
 
 ## Session log
 
+- 2026-06-27: Shipped the first typed-edge slice (concept `23`): a deterministic
+  depth-1 Rust `calls` graph. Migration 005 (`chunks.symbol` + `edges`),
+  conservative query-time resolution, CLI `graph`, one `find_related` MCP tool,
+  and `status` graph coverage. Verification caught a method-call false positive
+  (`row.get()` -> `profile::get`) and a v4-corpus read break on the new column;
+  fixed by dropping method-call edges, making `refresh` a true forced re-index,
+  upgrading out-of-date schemas in place on read, and omitting external/no-def
+  names from callers as well as callees. 116 tests; release-binary graph and MCP
+  smokes passed; current refreshed Forge gate is routed 50/68 versus
+  fts5-reranked 48/68, with routed still slightly ahead on weighted tokens per
+  answered query.
 - 2026-06-27: Shipped duplicate-body header compaction for `fts5-reranked` and
   routed retrieval. It fixes cloned-boilerplate crowding in top-K headers and
-  improves the current refreshed Forge gate to fts5-reranked 48/68 and routed
-  52/68. Source-path token weighting was tested and rejected.
+  improved that closeout's refreshed Forge gate to fts5-reranked 48/68 and
+  routed 52/68. Source-path token weighting was tested and rejected.
 - 2026-06-27: Diagnosed and repaired Forge gate drift. Evaluation manifests under
   `fixtures/eval/*.json` were indexed into the live Forge corpus, contaminating
   retrieval with oracle query/answer text. Discovery now excludes eval manifests;

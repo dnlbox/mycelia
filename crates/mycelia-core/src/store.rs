@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::model::{
-    Chunk, ChunkRecord, IndexReport, RetrievalStrategy, Retrieved, SearchHit, SourceRefresh,
-    SourceSpan,
+    Chunk, ChunkRecord, Direction, EDGE_CONFIDENCE_EXTRACTED, EDGE_TYPE_CALLS, IndexReport,
+    RelatedHit, RetrievalStrategy, Retrieved, SearchHeader, SearchHit, SourceRefresh, SourceSpan,
 };
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
@@ -14,7 +14,8 @@ const MIGRATION_001: &str = include_str!("../migrations/001_initial.sql");
 const MIGRATION_002: &str = include_str!("../migrations/002_fts5.sql");
 const MIGRATION_003: &str = include_str!("../migrations/003_embeddings.sql");
 const MIGRATION_004: &str = include_str!("../migrations/004_source_extractor.sql");
-const LATEST_SCHEMA_VERSION: i64 = 4;
+const MIGRATION_005: &str = include_str!("../migrations/005_graph_edges.sql");
+const LATEST_SCHEMA_VERSION: i64 = 5;
 
 /// A stored embedding with the cheap keys needed to rank it, but without the
 /// chunk body. Bodies are hydrated only for the ranked winners.
@@ -26,6 +27,17 @@ pub(crate) struct EmbeddingVector {
 }
 
 pub(crate) fn index_corpus(root: &Path, database: &Path) -> Result<IndexReport> {
+    index_corpus_inner(root, database, false)
+}
+
+/// Re-indexes every discovered source even when its content is unchanged, so a
+/// schema or extractor upgrade (such as the call graph) backfills onto an
+/// existing corpus. This is the forced full re-index behind `mycelia refresh`.
+pub(crate) fn reindex_corpus(root: &Path, database: &Path) -> Result<IndexReport> {
+    index_corpus_inner(root, database, true)
+}
+
+fn index_corpus_inner(root: &Path, database: &Path, force: bool) -> Result<IndexReport> {
     let started_at = Instant::now();
     let canonical_root = canonicalize_root(root)?;
     let mut discovery = crate::discovery::discover(canonical_root.as_path())?;
@@ -41,6 +53,7 @@ pub(crate) fn index_corpus(root: &Path, database: &Path) -> Result<IndexReport> 
         discovery.rejected,
         crate::extract::extract_text,
         crate::extract::extractor_id_for,
+        force,
     )?;
     report.elapsed_ms = started_at.elapsed().as_millis();
     Ok(report)
@@ -77,7 +90,7 @@ fn find_substring(database: &Path, query: &str, limit: usize) -> Result<Vec<Sear
     let lowercase_query = query.to_lowercase();
     let like_pattern = format!("%{lowercase_query}%");
     let mut statement = connection.prepare(
-        "SELECT id, source_path, source_hash, byte_start, byte_end, line_start, line_end, text, extractor
+        "SELECT id, source_path, source_hash, byte_start, byte_end, line_start, line_end, text, extractor, symbol
          FROM chunks
          WHERE lower(text) LIKE ?1
          ORDER BY source_path ASC, byte_start ASC, id ASC",
@@ -210,6 +223,7 @@ fn find_fts5_candidates(database: &Path, query: &str, limit: usize) -> Result<Ve
             chunks.line_end,
             chunks.text,
             chunks.extractor,
+            chunks.symbol,
             -bm25(chunk_fts) AS score
          FROM chunk_fts
          JOIN chunks ON chunks.rowid = chunk_fts.rowid
@@ -226,7 +240,7 @@ fn find_fts5_candidates(database: &Path, query: &str, limit: usize) -> Result<Ve
         |row| -> rusqlite::Result<SearchHit> {
             Ok(SearchHit {
                 chunk: chunk_record_from_row(row)?,
-                score: row.get(9)?,
+                score: row.get(10)?,
             })
         },
     )?;
@@ -240,7 +254,7 @@ pub(crate) fn retrieve(database: &Path, chunk_id: &str) -> Result<Option<Retriev
 
     let record = connection
         .query_row(
-            "SELECT id, source_path, source_hash, byte_start, byte_end, line_start, line_end, text, extractor
+            "SELECT id, source_path, source_hash, byte_start, byte_end, line_start, line_end, text, extractor, symbol
              FROM chunks
              WHERE id = ?1",
             [chunk_id],
@@ -262,6 +276,135 @@ pub(crate) fn retrieve(database: &Path, chunk_id: &str) -> Result<Option<Retriev
         .ok_or(Error::MissingCorpusRoot)?;
 
     Ok(Some(validate_freshness(stored_root.as_str(), record)))
+}
+
+/// Standard chunk column list (indices 0..=9) prefixed with the chunks table,
+/// for joins that also select edge columns.
+const CHUNK_COLUMNS_PREFIXED: &str = "chunks.id, chunks.source_path, chunks.source_hash, \
+     chunks.byte_start, chunks.byte_end, chunks.line_start, chunks.line_end, chunks.text, \
+     chunks.extractor, chunks.symbol";
+
+pub(crate) fn find_relationships(
+    database: &Path,
+    symbol: &str,
+    direction: Direction,
+) -> Result<Vec<RelatedHit>> {
+    let connection = open_database(database, Access::ReadOnly)?;
+    match direction {
+        Direction::Callers => relationship_callers(&connection, symbol),
+        Direction::Callees => relationship_callees(&connection, symbol),
+    }
+}
+
+/// Chunks that call `symbol`. Each hit is a real call site; `resolved` reflects
+/// whether the queried name maps to exactly one in-corpus definition, so a caller
+/// of an ambiguous (or external) name is surfaced honestly rather than silently
+/// attributed to one definition.
+fn relationship_callers(connection: &Connection, symbol: &str) -> Result<Vec<RelatedHit>> {
+    let definition_count = symbol_definition_count(connection, symbol)?;
+    if definition_count == 0 {
+        return Ok(Vec::new());
+    }
+    let sql = format!(
+        "SELECT {CHUNK_COLUMNS_PREFIXED},
+                edges.byte_start, edges.byte_end, edges.line_start, edges.line_end
+         FROM edges
+         JOIN chunks ON chunks.id = edges.src_chunk_id
+         WHERE edges.dst_symbol = ?1 AND edges.edge_type = ?2
+         ORDER BY chunks.source_path ASC, chunks.byte_start ASC, edges.byte_start ASC"
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params![symbol, EDGE_TYPE_CALLS], |row| {
+        Ok((chunk_record_from_row(row)?, span_from_row(row, 10)?))
+    })?;
+
+    let mut hits = Vec::new();
+    for row in rows {
+        let (record, call_site) = row?;
+        hits.push(RelatedHit {
+            symbol: record.symbol.clone().unwrap_or_default(),
+            definition: SearchHeader::from_record(&record, 0.0),
+            call_site,
+            resolved: definition_count == 1,
+            definition_count,
+        });
+    }
+    Ok(hits)
+}
+
+/// Definitions of the symbols that `symbol` calls. A callee name with no
+/// in-corpus definition (a std or external call) resolves to nothing and is
+/// omitted; an ambiguous name yields one hit per candidate with `resolved` false.
+fn relationship_callees(connection: &Connection, symbol: &str) -> Result<Vec<RelatedHit>> {
+    let source_ids = {
+        let mut statement = connection.prepare(
+            "SELECT id FROM chunks WHERE symbol = ?1 ORDER BY source_path ASC, byte_start ASC",
+        )?;
+        let rows = statement.query_map([symbol], |row| row.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<Vec<String>>>()?
+    };
+
+    let mut hits = Vec::new();
+    for source_id in &source_ids {
+        let call_sites = {
+            let mut statement = connection.prepare(
+                "SELECT dst_symbol, byte_start, byte_end, line_start, line_end
+                 FROM edges
+                 WHERE src_chunk_id = ?1 AND edge_type = ?2
+                 ORDER BY byte_start ASC",
+            )?;
+            let rows = statement.query_map(params![source_id, EDGE_TYPE_CALLS], |row| {
+                Ok((row.get::<_, String>(0)?, span_from_row(row, 1)?))
+            })?;
+            rows.collect::<rusqlite::Result<Vec<(String, SourceSpan)>>>()?
+        };
+
+        for (callee, call_site) in call_sites {
+            let definitions = load_chunks_by_symbol(connection, callee.as_str())?;
+            let definition_count = definitions.len();
+            for definition in &definitions {
+                hits.push(RelatedHit {
+                    symbol: callee.clone(),
+                    definition: SearchHeader::from_record(definition, 0.0),
+                    call_site: call_site.clone(),
+                    resolved: definition_count == 1,
+                    definition_count,
+                });
+            }
+        }
+    }
+    Ok(hits)
+}
+
+fn symbol_definition_count(connection: &Connection, symbol: &str) -> Result<usize> {
+    let count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM chunks WHERE symbol = ?1",
+        [symbol],
+        |row| row.get(0),
+    )?;
+    Ok(usize::try_from(count).unwrap_or(0))
+}
+
+fn load_chunks_by_symbol(connection: &Connection, symbol: &str) -> Result<Vec<ChunkRecord>> {
+    let mut statement = connection.prepare(
+        "SELECT id, source_path, source_hash, byte_start, byte_end, line_start, line_end, text, extractor, symbol
+         FROM chunks
+         WHERE symbol = ?1
+         ORDER BY source_path ASC, byte_start ASC",
+    )?;
+    let rows = statement.query_map([symbol], chunk_record_from_row)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<ChunkRecord>>>()?)
+}
+
+/// Reads a four-column `SourceSpan` (byte_start, byte_end, line_start, line_end)
+/// starting at `base`.
+fn span_from_row(row: &rusqlite::Row<'_>, base: usize) -> rusqlite::Result<SourceSpan> {
+    Ok(SourceSpan {
+        byte_start: row_i64_to_usize(row, base)?,
+        byte_end: row_i64_to_usize(row, base + 1)?,
+        line_start: row_i64_to_usize(row, base + 2)?,
+        line_end: row_i64_to_usize(row, base + 3)?,
+    })
 }
 
 /// Re-validates one chunk against its source file on disk. The precise indexed
@@ -485,7 +628,7 @@ pub(crate) fn chunks_missing_embeddings(
 ) -> Result<Vec<ChunkRecord>> {
     let connection = open_database(database, Access::ReadOnly)?;
     let mut statement = connection.prepare(
-        "SELECT id, source_path, source_hash, byte_start, byte_end, line_start, line_end, text, extractor
+        "SELECT id, source_path, source_hash, byte_start, byte_end, line_start, line_end, text, extractor, symbol
          FROM chunks
          WHERE NOT EXISTS (
              SELECT 1
@@ -624,7 +767,7 @@ pub(crate) fn chunks_by_ids(
     for batch in ids.chunks(500) {
         let placeholders = vec!["?"; batch.len()].join(", ");
         let sql = format!(
-            "SELECT id, source_path, source_hash, byte_start, byte_end, line_start, line_end, text, extractor
+            "SELECT id, source_path, source_hash, byte_start, byte_end, line_start, line_end, text, extractor, symbol
              FROM chunks
              WHERE id IN ({placeholders})"
         );
@@ -666,6 +809,20 @@ pub(crate) fn corpus_db_stats(database: &Path) -> Result<crate::model::CorpusSta
         0
     };
 
+    let symbol_count: usize = {
+        let n: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM chunks WHERE symbol IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        usize::try_from(n).unwrap_or(0)
+    };
+
+    let edge_count: usize = {
+        let n: i64 = connection.query_row("SELECT COUNT(*) FROM edges", [], |row| row.get(0))?;
+        usize::try_from(n).unwrap_or(0)
+    };
+
     let db_size_bytes = std::fs::metadata(database).map(|m| m.len()).unwrap_or(0);
 
     Ok(crate::model::CorpusStatusReport {
@@ -673,6 +830,8 @@ pub(crate) fn corpus_db_stats(database: &Path) -> Result<crate::model::CorpusSta
         embedding_count,
         embedding_model,
         db_size_bytes,
+        symbol_count,
+        edge_count,
     })
 }
 
@@ -683,6 +842,7 @@ fn index_corpus_with_files<I, P, E, G>(
     initially_rejected: usize,
     extract_fn: E,
     extractor_id_fn: G,
+    force: bool,
 ) -> Result<IndexReport>
 where
     I: IntoIterator<Item = P>,
@@ -752,11 +912,13 @@ where
         };
         let source_hash = blake3::hash(bytes.as_slice()).to_hex().to_string();
 
-        if existing_sources.get(relative_path.as_str()).is_some_and(
-            |(existing_hash, existing_extractor)| {
-                existing_hash == &source_hash && existing_extractor == would_use_extractor
-            },
-        ) {
+        if !force
+            && existing_sources.get(relative_path.as_str()).is_some_and(
+                |(existing_hash, existing_extractor)| {
+                    existing_hash == &source_hash && existing_extractor == would_use_extractor
+                },
+            )
+        {
             report.unchanged += 1;
             continue;
         }
@@ -803,9 +965,11 @@ where
 
 #[derive(Clone, Copy)]
 enum Access {
-    /// Open an existing database read-only. Never creates the file and never
-    /// runs migrations, so read commands cannot materialize or mutate a corpus
-    /// on disk as a side effect.
+    /// Open an existing database read-only. Never creates the file, so read
+    /// commands cannot materialize a corpus on disk. An existing database whose
+    /// schema is behind the current version is upgraded in place first (a
+    /// schema-only migration of an existing corpus, not new content), so reads
+    /// always see the current schema rather than failing on a missing column.
     ReadOnly,
     /// Open an existing database for writing, applying any pending migrations.
     ReadWrite,
@@ -822,29 +986,44 @@ fn open_database(database: &Path, access: Access) -> Result<Connection> {
         fs::create_dir_all(parent).map_err(|source| Error::io(parent, source))?;
     }
 
-    let mut connection = match access {
-        Access::ReadOnly => Connection::open_with_flags(
-            database,
-            OpenFlags::SQLITE_OPEN_READ_ONLY
-                | OpenFlags::SQLITE_OPEN_URI
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?,
-        Access::ReadWrite => Connection::open_with_flags(
-            database,
-            OpenFlags::SQLITE_OPEN_READ_WRITE
-                | OpenFlags::SQLITE_OPEN_URI
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?,
-        Access::Create => Connection::open(database)?,
-    };
+    const READ_ONLY_FLAGS: OpenFlags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        .union(OpenFlags::SQLITE_OPEN_URI)
+        .union(OpenFlags::SQLITE_OPEN_NO_MUTEX);
 
-    match access {
-        Access::ReadOnly => verify_schema_version(&connection)?,
-        Access::ReadWrite | Access::Create => {
+    let connection = match access {
+        Access::ReadOnly => {
+            let connection = Connection::open_with_flags(database, READ_ONLY_FLAGS)?;
+            verify_schema_version(&connection)?;
+            let user_version: i64 =
+                connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+            if user_version < LATEST_SCHEMA_VERSION {
+                // The corpus predates a schema-only migration. Upgrade it in
+                // place through a write open, then continue read-only.
+                drop(connection);
+                drop(open_database(database, Access::ReadWrite)?);
+                Connection::open_with_flags(database, READ_ONLY_FLAGS)?
+            } else {
+                connection
+            }
+        }
+        Access::ReadWrite => {
+            let mut connection = Connection::open_with_flags(
+                database,
+                OpenFlags::SQLITE_OPEN_READ_WRITE
+                    | OpenFlags::SQLITE_OPEN_URI
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )?;
             connection.pragma_update(None, "foreign_keys", 1_i64)?;
             apply_migrations(&mut connection)?;
+            connection
         }
-    }
+        Access::Create => {
+            let mut connection = Connection::open(database)?;
+            connection.pragma_update(None, "foreign_keys", 1_i64)?;
+            apply_migrations(&mut connection)?;
+            connection
+        }
+    };
 
     Ok(connection)
 }
@@ -893,6 +1072,14 @@ fn apply_migrations(connection: &mut Connection) -> Result<()> {
         let transaction = connection.transaction()?;
         transaction.execute_batch(MIGRATION_004)?;
         transaction.pragma_update(None, "user_version", 4_i64)?;
+        transaction.commit()?;
+        user_version = 4;
+    }
+
+    if user_version < 5 {
+        let transaction = connection.transaction()?;
+        transaction.execute_batch(MIGRATION_005)?;
+        transaction.pragma_update(None, "user_version", 5_i64)?;
         transaction.commit()?;
     }
 
@@ -971,8 +1158,24 @@ fn replace_source(
             line_start,
             line_end,
             text,
-            extractor
-         ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            extractor,
+            symbol
+         ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+    )?;
+
+    // Edges are stored by callee name and cascade with their owning chunk: the
+    // `DELETE FROM chunks` above already removed any prior edges for this source.
+    let mut edge_statement = transaction.prepare(
+        "INSERT INTO edges(
+            src_chunk_id,
+            edge_type,
+            dst_symbol,
+            confidence,
+            byte_start,
+            byte_end,
+            line_start,
+            line_end
+         ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )?;
 
     for chunk in chunks {
@@ -986,7 +1189,21 @@ fn replace_source(
             usize_to_i64(chunk.span.line_end)?,
             chunk.text.as_str(),
             chunk.extractor,
+            chunk.symbol.as_deref(),
         ])?;
+
+        for edge in &chunk.edges {
+            edge_statement.execute(params![
+                chunk.id.as_str(),
+                edge.edge_type,
+                edge.dst_symbol.as_str(),
+                EDGE_CONFIDENCE_EXTRACTED,
+                usize_to_i64(edge.span.byte_start)?,
+                usize_to_i64(edge.span.byte_end)?,
+                usize_to_i64(edge.span.line_start)?,
+                usize_to_i64(edge.span.line_end)?,
+            ])?;
+        }
     }
 
     Ok(())
@@ -1015,6 +1232,7 @@ fn chunk_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChunkRecor
         },
         text: row.get(7)?,
         extractor: row.get(8)?,
+        symbol: row.get(9)?,
     })
 }
 
@@ -1283,6 +1501,8 @@ mod tests {
                 },
                 text: segment.to_owned(),
                 extractor: "test-extractor",
+                symbol: None,
+                edges: Vec::new(),
             });
 
             cursor = byte_end + 2;
@@ -1301,6 +1521,7 @@ mod tests {
             0,
             test_extract_text,
             |_| "test-extractor",
+            false,
         )
     }
 
@@ -1354,7 +1575,7 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))
             .expect("chunk count");
 
-        assert_eq!(user_version, 4);
+        assert_eq!(user_version, 5);
         assert_eq!(foreign_keys, 1);
         assert_eq!(
             corpus_root,
@@ -1362,6 +1583,221 @@ mod tests {
         );
         assert_eq!(source_count, 2);
         assert_eq!(chunk_count, 3);
+    }
+
+    #[test]
+    fn read_open_upgrades_out_of_date_schema_in_place() {
+        let temp = tempdir().expect("tempdir");
+        let database = temp.path().join("legacy.sqlite3");
+
+        // Build a genuine pre-graph (version 4) database: migrations 001..=004
+        // only, so there is no `symbol` column and no `edges` table.
+        {
+            let connection = Connection::open(&database).expect("open");
+            for migration in [MIGRATION_001, MIGRATION_002, MIGRATION_003, MIGRATION_004] {
+                connection
+                    .execute_batch(migration)
+                    .expect("apply migration");
+            }
+            connection
+                .pragma_update(None, "user_version", 4_i64)
+                .expect("set version 4");
+        }
+
+        // A read open must transparently upgrade the schema rather than fail.
+        let connection = open_database(&database, Access::ReadOnly).expect("read open upgrades");
+        let user_version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("version");
+        let edge_table: Option<String> = connection
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'edges'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .expect("edge table query");
+        assert_eq!(user_version, 5);
+        assert_eq!(edge_table.as_deref(), Some("edges"));
+    }
+
+    #[test]
+    fn forced_reindex_backfills_graph_when_normal_index_would_skip() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("corpus");
+        write_text_file(
+            root.join("lib.rs").as_path(),
+            "fn helper() -> i32 {\n    42\n}\n\nfn caller() -> i32 {\n    helper()\n}\n",
+        );
+        let database = temp.path().join("mycelia.sqlite3");
+        index_corpus(root.as_path(), database.as_path()).expect("index");
+
+        // Simulate a corpus indexed before the graph migration: strip its symbols
+        // and edges, leaving content and source hashes untouched.
+        {
+            let connection = open_db(database.as_path());
+            connection
+                .execute("UPDATE chunks SET symbol = NULL", [])
+                .expect("clear symbols");
+            connection
+                .execute("DELETE FROM edges", [])
+                .expect("clear edges");
+        }
+
+        // A normal index skips the unchanged source, so the graph stays empty.
+        index_corpus(root.as_path(), database.as_path()).expect("normal reindex");
+        let after_normal: i64 = open_db(database.as_path())
+            .query_row("SELECT COUNT(*) FROM edges", [], |row| row.get(0))
+            .expect("edge count");
+        assert_eq!(after_normal, 0);
+
+        // A forced reindex re-extracts even the unchanged source and backfills.
+        reindex_corpus(root.as_path(), database.as_path()).expect("forced reindex");
+        let connection = open_db(database.as_path());
+        let edges: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM edges WHERE dst_symbol = 'helper'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("edge count");
+        let symbols: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM chunks WHERE symbol IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("symbol count");
+        assert_eq!(edges, 1);
+        assert_eq!(symbols, 2);
+    }
+
+    #[test]
+    fn rust_calls_edges_persist_and_cascade_on_reindex() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("corpus");
+        let file = root.join("lib.rs");
+        write_text_file(
+            file.as_path(),
+            "fn helper() -> i32 { 42 }\n\nfn caller() -> i32 { helper() }\n",
+        );
+        let database = temp.path().join("mycelia.sqlite3");
+
+        index_corpus(root.as_path(), database.as_path()).expect("index");
+
+        let connection = open_db(database.as_path());
+        let edge_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM edges WHERE dst_symbol = 'helper' AND edge_type = 'calls'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("edge count");
+        let symbol_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM chunks WHERE symbol = 'caller'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("symbol count");
+        assert_eq!(edge_count, 1);
+        assert_eq!(symbol_count, 1);
+        drop(connection);
+
+        // Rewriting the source to drop the call re-indexes the file, deleting its
+        // chunks and cascading their edges; the helper edge must be gone.
+        write_text_file(
+            file.as_path(),
+            "fn helper() -> i32 { 42 }\n\nfn caller() -> i32 { 0 }\n",
+        );
+        index_corpus(root.as_path(), database.as_path()).expect("reindex");
+
+        let connection = open_db(database.as_path());
+        let edge_count_after: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM edges WHERE dst_symbol = 'helper'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("edge count after");
+        assert_eq!(edge_count_after, 0);
+    }
+
+    #[test]
+    fn find_relationships_resolves_unique_callers_and_callees() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("corpus");
+        write_text_file(
+            root.join("lib.rs").as_path(),
+            "fn helper() -> i32 {\n    42\n}\n\n\
+             fn caller() -> i32 {\n    helper()\n}\n\n\
+             fn other() -> i32 {\n    helper()\n}\n",
+        );
+        let database = temp.path().join("mycelia.sqlite3");
+        index_corpus(root.as_path(), database.as_path()).expect("index");
+
+        let callers =
+            find_relationships(database.as_path(), "helper", Direction::Callers).expect("callers");
+        let caller_symbols: Vec<&str> = callers.iter().map(|hit| hit.symbol.as_str()).collect();
+        assert_eq!(caller_symbols, vec!["caller", "other"]);
+        assert!(
+            callers
+                .iter()
+                .all(|hit| hit.resolved && hit.definition_count == 1)
+        );
+        // Each caller hit points the definition header at the calling chunk and
+        // sources the call site inside it.
+        assert!(callers[0].definition.source_path.ends_with("lib.rs"));
+
+        let callees =
+            find_relationships(database.as_path(), "caller", Direction::Callees).expect("callees");
+        assert_eq!(callees.len(), 1);
+        assert_eq!(callees[0].symbol, "helper");
+        assert!(callees[0].resolved);
+        assert_eq!(callees[0].definition.span.line_start, 1);
+    }
+
+    #[test]
+    fn find_relationships_flags_ambiguity_and_omits_external() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("corpus");
+        write_text_file(
+            root.join("a.rs").as_path(),
+            "fn helper() {}\n\nfn caller() {\n    helper();\n    println!(\"x\");\n}\n",
+        );
+        // A second definition of `helper` makes the name ambiguous.
+        write_text_file(root.join("b.rs").as_path(), "fn helper() {}\n");
+        let database = temp.path().join("mycelia.sqlite3");
+        index_corpus(root.as_path(), database.as_path()).expect("index");
+
+        // `helper` resolves to two definitions: every callee candidate is returned
+        // and flagged, never collapsed to one.
+        let callees =
+            find_relationships(database.as_path(), "caller", Direction::Callees).expect("callees");
+        let helper_hits: Vec<&RelatedHit> = callees
+            .iter()
+            .filter(|hit| hit.symbol == "helper")
+            .collect();
+        assert_eq!(helper_hits.len(), 2);
+        assert!(
+            helper_hits
+                .iter()
+                .all(|hit| !hit.resolved && hit.definition_count == 2)
+        );
+        // `println` has no in-corpus definition, so the external call is omitted.
+        assert!(callees.iter().all(|hit| hit.symbol != "println"));
+
+        let callers =
+            find_relationships(database.as_path(), "helper", Direction::Callers).expect("callers");
+        assert_eq!(callers.len(), 1);
+        assert_eq!(callers[0].symbol, "caller");
+        assert!(!callers[0].resolved);
+        assert_eq!(callers[0].definition_count, 2);
+
+        let external_callers =
+            find_relationships(database.as_path(), "println", Direction::Callers)
+                .expect("external callers");
+        assert!(external_callers.is_empty());
     }
 
     #[test]
@@ -1839,7 +2275,7 @@ mod tests {
             open_database(database.as_path(), Access::ReadOnly),
             Err(Error::UnsupportedSchemaVersion {
                 found: 99,
-                supported: 4
+                supported: 5
             })
         ));
     }
@@ -2065,7 +2501,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("embedding table");
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
         assert_eq!(embedding_table, "embeddings");
     }
 
