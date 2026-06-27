@@ -69,8 +69,8 @@ Before that, use low-friction paths that exercise different adoption risks:
 Current quick install options:
 
 ```text
-cargo install mycelia-cli --git https://github.com/dnlbox/mycelia.git --tag v0.1.3 --locked
-curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.3/install.sh | sh
+cargo install --force mycelia-cli --git https://github.com/dnlbox/mycelia.git --tag v0.1.4 --locked
+curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.4/install.sh | sh
 ```
 
 Tap staging path:
@@ -93,7 +93,7 @@ source archive with a SHA-256:
 class Mycelia < Formula
   desc "Local, content-agnostic knowledge index for agent retrieval"
   homepage "https://github.com/dnlbox/mycelia"
-  url "https://github.com/dnlbox/mycelia/archive/refs/tags/v0.1.3.tar.gz"
+  url "https://github.com/dnlbox/mycelia/archive/refs/tags/v0.1.4.tar.gz"
   sha256 "5bfb7408b7bc5f3ddb7a53b4d114c91d2760c35f814e43e6cc43e708e547ed8b"
   license "Apache-2.0"
 

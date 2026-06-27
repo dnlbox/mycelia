@@ -53,8 +53,15 @@ impl Strategy {
 
 #[derive(Parser, Debug)]
 #[command(name = "mycelia")]
-#[command(about = "Local knowledge index")]
+#[command(version)]
+#[command(about = "Local, content-aware knowledge index for AI agents")]
+#[command(
+    long_about = "Mycelia indexes a local corpus, exposes token-efficient find/retrieve tools, and wires the index into local AI harnesses."
+)]
 #[command(arg_required_else_help = true)]
+#[command(
+    after_help = "Typical flow:\n  mycelia setup\n  mycelia connect codex\n  mycelia status\n\nUseful checks:\n  mycelia list\n  mycelia stats\n\nThe old `mycelia corpus ...` commands are retired. Use `setup`, `status`, and `list`."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -104,6 +111,8 @@ enum Command {
         #[command(flatten)]
         target: CwdTarget,
     },
+    /// Retired command group. Use setup, status, and list instead.
+    Corpus,
     /// Search the index and print ranked headers.
     Find {
         query: String,
@@ -329,6 +338,10 @@ where
         Command::Refresh { target } => cmd_refresh(target),
         Command::List => cmd_list(),
         Command::Delete { target } => cmd_delete(target),
+        Command::Corpus => Err(
+            "`mycelia corpus` has been retired. Use `mycelia setup`, `mycelia status`, or `mycelia list`."
+                .to_string(),
+        ),
 
         Command::Find {
             query,

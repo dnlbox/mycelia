@@ -140,6 +140,9 @@ Agent working area. A fresh session reads this top to bottom, then follows
 - 2026-06-26: Added staging Homebrew formula under `packaging/homebrew/Formula`,
   documented tap and Cargo install paths, and expanded `.gitignore` for local DB,
   env, editor, log, and smoke-test output.
+- 2026-06-26: CLI polish for stale-install confusion: installer now passes
+  `cargo install --force`, top-level help includes version and journey hints, and
+  retired `mycelia corpus` emits a migration message to `setup`/`status`/`list`.
 - 2026-06-26: Refreshed README to current shipped behavior and changed the repo
   license from MIT metadata-only to Apache-2.0 with a top-level license file.
 - 2026-06-26: Slice 19 complete; shipped logs, stats/status, path-aware journey

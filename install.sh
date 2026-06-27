@@ -2,7 +2,7 @@
 set -eu
 
 repo="${MYCELIA_REPO:-https://github.com/dnlbox/mycelia.git}"
-ref="${MYCELIA_REF:-v0.1.3}"
+ref="${MYCELIA_REF:-v0.1.4}"
 ref_type="${MYCELIA_REF_TYPE:-tag}"
 root="${MYCELIA_INSTALL_ROOT:-$HOME/.local}"
 profile="${MYCELIA_CARGO_PROFILE:-release}"
@@ -41,6 +41,7 @@ cargo install \
   --git "$repo" \
   "--$ref_type" "$ref" \
   --root "$root" \
+  --force \
   --locked \
   $profile_args
 

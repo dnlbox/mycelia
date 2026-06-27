@@ -62,27 +62,27 @@ The tap repository should be `github.com/dnlbox/homebrew-mycelia`, with
 Quick install with Cargo, no clone needed:
 
 ```text
-cargo install mycelia-cli --git https://github.com/dnlbox/mycelia.git --tag v0.1.3 --locked
+cargo install --force mycelia-cli --git https://github.com/dnlbox/mycelia.git --tag v0.1.4 --locked
 ```
 
 Curl installer, useful when you want one command and do not want to remember the
 Cargo syntax:
 
 ```text
-curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.3/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.4/install.sh | sh
 ```
 
 The script installs the tagged CLI with Cargo into `${MYCELIA_INSTALL_ROOT:-$HOME/.local}`.
 Override the version with `MYCELIA_REF`, for example:
 
 ```text
-curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.3/install.sh | MYCELIA_REF=v0.1.3 sh
+curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.4/install.sh | MYCELIA_REF=v0.1.4 sh
 ```
 
 From a checkout, for development:
 
 ```text
-cargo install --path crates/mycelia-cli --root "$HOME/.local"
+cargo install --force --path crates/mycelia-cli --root "$HOME/.local"
 ```
 
 The Homebrew formula builds from a tagged source archive with
