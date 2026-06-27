@@ -48,29 +48,41 @@ Meaning:
 
 ## Packaging decisions
 
-### 1. Curl installer first, official Homebrew later
+### 1. Staging ladder: cargo/curl, tap, Homebrew/core
 
-Do not create a personal tap. The interim install path is a checked `install.sh`
-script fetched over curl. The final package-manager path is a direct
-`homebrew/core` submission once the project meets Homebrew's acceptance bar.
-
-Reasons:
-
-- A curl installer gives early users one command without introducing a temporary
-  tap identity that would later need to be retired.
-- `homebrew/core` should be the only Homebrew story, not a second-class tap.
-- The curl script can use the default developer build, while Homebrew/core can
-  use the stricter system-ORT build.
-
-Implemented first-cut installer:
+The desired permanent path is official Homebrew:
 
 ```text
+brew install mycelia
+```
+
+Before that, use low-friction paths that exercise different adoption risks:
+
+- `cargo install --git` proves Rust users can install from the tag without a
+  clone.
+- `install.sh` gives a one-command curl path for users who do not want to
+  remember Cargo's Git syntax.
+- A personal tap gives the exact `brew tap` / `brew install` experience before
+  submitting to Homebrew/core.
+- Homebrew/core remains the final package-manager target.
+
+Current quick install options:
+
+```text
+cargo install mycelia-cli --git https://github.com/dnlbox/mycelia.git --tag v0.1.3 --locked
 curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.3/install.sh | sh
 ```
 
-The script requires Cargo and installs the tagged CLI from GitHub into
-`${MYCELIA_INSTALL_ROOT:-$HOME/.local}`. It is intentionally separate from the
-future Homebrew formula.
+Tap staging path:
+
+```text
+brew tap dnlbox/mycelia
+brew install mycelia
+```
+
+The tap repository should be `github.com/dnlbox/homebrew-mycelia`, with
+`packaging/homebrew/Formula/mycelia.rb` copied to `Formula/mycelia.rb`. Treat this as a
+staging channel, not the permanent Homebrew destination.
 
 ### 2. Build from source
 
@@ -82,7 +94,7 @@ class Mycelia < Formula
   desc "Local, content-agnostic knowledge index for agent retrieval"
   homepage "https://github.com/dnlbox/mycelia"
   url "https://github.com/dnlbox/mycelia/archive/refs/tags/v0.1.3.tar.gz"
-  sha256 "<source archive sha256>"
+  sha256 "5bfb7408b7bc5f3ddb7a53b4d114c91d2760c35f814e43e6cc43e708e547ed8b"
   license "Apache-2.0"
 
   depends_on "rust" => :build
@@ -221,10 +233,12 @@ Before Homebrew/core submission:
 1. Implement the `semantic-system-ort` build mode. (Done.)
 2. Verify the installed binary finds Homebrew `onnxruntime` without user env vars.
 3. Keep `setup` as the first model-download and embed path. (Done.)
-4. Add or update README install instructions. (Done for curl installer.)
+4. Add or update README install instructions. (Done for cargo/curl/tap staging.)
 5. Tag the release and compute the source archive SHA-256.
-6. Draft the Homebrew/core formula outside this source tree.
-7. Run the formula gates in a Homebrew checkout:
+6. Test the tap formula from `packaging/homebrew/Formula/mycelia.rb`.
+7. Draft the Homebrew/core formula from the same formula once the tap path is
+   proven.
+8. Run the formula gates in a Homebrew checkout:
 
 ```text
 brew install --build-from-source ./Formula/mycelia.rb
@@ -232,7 +246,7 @@ brew test mycelia
 brew audit --strict --new --online ./Formula/mycelia.rb
 ```
 
-8. Run the gold path manually against a disposable corpus:
+9. Run the gold path manually against a disposable corpus:
 
 ```text
 brew install mycelia

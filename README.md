@@ -42,7 +42,31 @@ unavailable. The provider-less synchronous core API remains lexical by default.
 
 ## Install
 
-Recommended install:
+Target install, after Homebrew/core acceptance:
+
+```text
+brew install mycelia
+```
+
+Homebrew staging path for testing the same user experience before submitting to
+Homebrew/core:
+
+```text
+brew tap dnlbox/mycelia
+brew install mycelia
+```
+
+The tap repository should be `github.com/dnlbox/homebrew-mycelia`, with
+`packaging/homebrew/Formula/mycelia.rb` copied to `Formula/mycelia.rb`.
+
+Quick install with Cargo, no clone needed:
+
+```text
+cargo install mycelia-cli --git https://github.com/dnlbox/mycelia.git --tag v0.1.3 --locked
+```
+
+Curl installer, useful when you want one command and do not want to remember the
+Cargo syntax:
 
 ```text
 curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.3/install.sh | sh
@@ -55,18 +79,17 @@ Override the version with `MYCELIA_REF`, for example:
 curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.3/install.sh | MYCELIA_REF=v0.1.3 sh
 ```
 
-From a checkout:
+From a checkout, for development:
 
 ```text
 cargo install --path crates/mycelia-cli --root "$HOME/.local"
 ```
 
-The official Homebrew path is planned as a later `homebrew/core` submission. The
-Homebrew formula should build from a tagged source archive with
-`--no-default-features --features semantic-system-ort`, depend on `onnxruntime`,
-and avoid ORT binary downloads during the formula build. The embedding model is
-still downloaded only by `setup` or `embed`, never by install, `find`, `serve`,
-or `connect`.
+The Homebrew formula builds from a tagged source archive with
+`--no-default-features --features semantic-system-ort`, depends on
+`onnxruntime`, and avoids ORT binary downloads during the formula build. The
+embedding model is still downloaded only by `setup` or `embed`, never by
+install, `find`, `serve`, or `connect`.
 
 The repo's validation commands expect Cargo from the stable Rust toolchain path:
 

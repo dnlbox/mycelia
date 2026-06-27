@@ -6,17 +6,18 @@ Agent working area. A fresh session reads this top to bottom, then follows
 ## Now
 
 - Milestone: slice `21` distribution readiness SHIPPED. AGENTS.md and concept
-  `21` are reconciled to curl-first plus official Homebrew/core later.
+  `21` are reconciled to cargo/curl quick installs, tap staging, and official
+  Homebrew/core later.
 - Implemented: Cargo feature split. Default builds use `semantic-download`;
   Homebrew/system builds use `--no-default-features --features
   semantic-system-ort` with FastEmbed dynamic ORT loading and a direct `ort`
   initialization hook.
-- Implemented: system-ORT runtime lookup. The formula wrapper sets
-  `ORT_DYLIB_PATH` from Homebrew `onnxruntime`, and the CLI scans
-  `HOMEBREW_PREFIX`, `/opt/homebrew`, and `/usr/local` when built for
+- Implemented: system-ORT runtime lookup. The CLI scans `HOMEBREW_PREFIX`,
+  `/opt/homebrew`, and `/usr/local` for Homebrew `onnxruntime` when built for
   `semantic-system-ort`.
-- Implemented: `install.sh` curl installer, README install notes, and doc scrub
-  of local absolute paths and credential-source details.
+- Implemented: `install.sh` curl installer, `cargo install --git` docs, tap
+  staging formula, README install notes, and doc scrub of local absolute paths
+  and credential-source details.
 - Validation: fmt, clippy, 90 tests, default release build, system-ORT release
   build, shell syntax, and lexical fixture smoke pass. Homebrew/core formula
   audit waits for the separate formula submission.
@@ -126,17 +127,19 @@ Agent working area. A fresh session reads this top to bottom, then follows
 - 2026-06-26: License Mycelia under Apache-2.0 rather than MIT. The project is
   intended to be permissive FOSS and embeddable in agent tools, and Apache-2.0's
   explicit patent grant is the better default for that path.
-- 2026-06-26: Do not create a personal Homebrew tap. Ship curl install first,
-  then submit directly to Homebrew/core once acceptance constraints are met. The
-  Homebrew/core formula must build from a tagged source archive and must not use
-  the curl installer.
+- 2026-06-26: A personal Homebrew tap is acceptable as a staging channel to test
+  the `brew tap` / `brew install` experience. The permanent Homebrew target is
+  still Homebrew/core. The formula must build from a tagged source archive and
+  must not use the curl installer.
 
 ## Session log
 
-- 2026-06-26: Distribution plan corrected per user direction: no tap, no
-  source-repo formula; added curl installer, kept system-ORT feature split for
-  future Homebrew/core, and bumped the public release target to v0.1.3 so the
-  tagged installer and tagged README are self-consistent.
+- 2026-06-26: Distribution plan updated: `cargo install --git` and curl are
+  quick installs, `dnlbox/homebrew-mycelia` is a staging tap, and Homebrew/core
+  remains the desired permanent `brew install mycelia` path.
+- 2026-06-26: Added staging Homebrew formula under `packaging/homebrew/Formula`,
+  documented tap and Cargo install paths, and expanded `.gitignore` for local DB,
+  env, editor, log, and smoke-test output.
 - 2026-06-26: Refreshed README to current shipped behavior and changed the repo
   license from MIT metadata-only to Apache-2.0 with a top-level license file.
 - 2026-06-26: Slice 19 complete; shipped logs, stats/status, path-aware journey

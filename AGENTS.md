@@ -255,9 +255,10 @@ Run these gates in order:
 - `setup` and `embed` are the only paths that may download the embedding model.
   Install, `find`, `serve`, and `connect` must not trigger model downloads or
   hidden corpus setup.
-- Interim distribution is `install.sh` via curl. The Homebrew target is
-  `homebrew/core`, not a personal tap. A Homebrew/core formula must build from a
-  tagged source archive and must not shell out to the curl installer.
+- Interim distribution is `cargo install --git`, `install.sh` via curl, and a
+  personal tap for staging the Homebrew UX. The permanent Homebrew target is
+  `homebrew/core`. Any Homebrew formula must build from a tagged source archive
+  and must not shell out to the curl installer.
 
 - Model source locations as byte ranges plus one-based line ranges.
 - Make identifiers deterministic. Do not use random identifiers for indexed data.
