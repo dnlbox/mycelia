@@ -1,8 +1,8 @@
 class Mycelia < Formula
   desc "Local, content-agnostic knowledge index for agent retrieval"
   homepage "https://github.com/dnlbox/mycelia"
-  url "https://github.com/dnlbox/mycelia/archive/refs/tags/v0.1.3.tar.gz"
-  sha256 "5bfb7408b7bc5f3ddb7a53b4d114c91d2760c35f814e43e6cc43e708e547ed8b"
+  url "https://github.com/dnlbox/mycelia/archive/refs/tags/v0.1.4.tar.gz"
+  sha256 "281ce4c89c121207f0bb2eef60da475c18bd4b5e219db7ec89de44d3da279d51"
   license "Apache-2.0"
 
   depends_on "rust" => :build
