@@ -9,6 +9,20 @@ Agent working area. A fresh session reads this top to bottom, then follows
   token-efficient orientation path, exposes `search_codebase` and
   `locate_implementation` aliases over the same read-only find path, and adds
   `stats --recent N` for quick adoption checks.
+- NEXT SLICE (start here): single multi-corpus MCP server. Spec is authored and
+  decided in `docs/concept/22_multi_corpus_server.md`; not yet implemented. Read
+  `22` in full, then work its "Migration, mapped to files" list in order:
+  1) `MyceliaServer` (`crates/mycelia-cli/src/mcp.rs`) from one bound database to
+  a lazy per-corpus registry + per-request resolver calling `infer_from_cwd`
+  (`crates/mycelia-cli/src/profile.rs`, already exists); 2) tool handlers add
+  optional `corpus` + the resolution ladder + `corpus:hash` ids; 3) `--corpus`
+  becomes the default/fallback, not the sole binding; 4) new `list_corpora`;
+  5) `connect` writes one entry; 6) extend the MCP stdio test. Driver and evidence
+  in `22` ("Evidence: deferral, not naming"): per-corpus servers expose 4xN tools
+  that trip harness tool-search deferral and hide Mycelia. Reconcile AGENTS.md
+  Project Specifics only once implemented (per `prompt.md`), not from the spec.
+  Validation gate: fmt, clippy, MCP stdio test, CLI + workspace tests; keep the
+  68-case Forge gate steady (routed 52/68).
 - Validation: fmt, clippy, focused MCP stdio test, CLI crate tests, and full
   workspace tests pass.
 - Parallel context: Ruby tree-sitter extraction support is present in the
@@ -140,9 +154,28 @@ Agent working area. A fresh session reads this top to bottom, then follows
   the `brew tap` / `brew install` experience. The permanent Homebrew target is
   still Homebrew/core. The formula must build from a tagged source archive and
   must not use the curl installer.
+- 2026-06-27: Move to a single multi-corpus MCP server (concept `22`). One server
+  resolves the corpus per request: explicit `corpus` arg, else cwd inference, else
+  single corpus, else a `needs_corpus` disambiguation. Reject a search-all
+  default; unnamed cross-corpus search manufactures ambiguity (several corpora
+  with `login()`), and genuine cross-corpus work is the user naming the other
+  corpus as a second scoped call. Redefine `--corpus X` from sole binding to
+  default/fallback (for Claude Desktop, which has no meaningful cwd). Namespace
+  chunk ids `corpus:hash` so `retrieve` stays single-argument. Motivation: 4xN
+  per-corpus tools inflate the aggregate that trips Claude Code's ~10% tool-search
+  deferral threshold, hiding Mycelia behind a search the model never runs; grep is
+  an always-loaded substitute, so aliases and server instructions never load while
+  deferred.
 
 ## Session log
 
+- 2026-06-27: Authored concept `22` (multi-corpus server); reconciled concept
+  `19` connect/golden-path notes and README MCP-surface/roadmap. Live MCP is
+  connected to Claude Desktop (`find`/`retrieve` + aliases verified). Diagnosed
+  why a fresh model still greps: harness tool-search deferral keeps the tools
+  name-only until searched, and an always-loaded grep satisfies the need, so the
+  aliases never load. Loaded-vs-deferred A/B test is pending a working headless
+  `claude` auth path.
 - 2026-06-26: Improved setup/refresh/embed progress: model preparation is now
   visible before embedding batch counters, batch progress is labeled
   `Embedding chunks`, and completion summarizes embedded/unchanged/storage.

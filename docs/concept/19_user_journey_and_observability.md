@@ -134,6 +134,10 @@ mycelia connect claude-code    # wires the corpus into the harness for you
 # restart the harness -> it auto-launches `mycelia serve --corpus forge`
 ```
 
+Under concept `22`, that single `connect` entry serves every registered corpus,
+not just `forge`; the harness launches one multi-corpus server and the corpus is
+resolved per request from the working directory.
+
 Ongoing:
 
 - `mycelia stats` — am I saving tokens?
@@ -162,6 +166,13 @@ The spec emitted is identical everywhere: launch the stdio command
 `mycelia serve --corpus <name>`. Only the file path and serialization differ, so
 the design is one connector core that produces a server spec plus per-target
 adapters that either call the harness's own CLI or write its config file.
+
+> Superseded by concept `22_multi_corpus_server.md`. `connect` now writes **one**
+> entry per harness, not one per corpus: a single multi-corpus server resolves
+> the corpus per request (cwd default, explicit `corpus` only when the user names
+> another project). `--corpus <name>` in the emitted spec becomes the *default*
+> corpus for harnesses without a meaningful cwd (Claude Desktop), not the only
+> one. Adding a corpus later needs no re-`connect`.
 
 Principles:
 

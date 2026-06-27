@@ -165,6 +165,12 @@ In stdio mode, stdout is reserved for MCP protocol messages. Diagnostics go to
 stderr. The server is intentionally read-only: indexing, ignore changes, mutation
 tools, watchers, and federation are deferred.
 
+The launch-bound, one-corpus-per-server model is planned to become a single
+multi-corpus server: `find` and `retrieve` gain an optional `corpus` argument,
+the corpus is otherwise inferred from the working directory, and `connect` writes
+one harness entry that reaches every registered corpus. See
+`docs/concept/22_multi_corpus_server.md`.
+
 ## Retrieval model
 
 The retrieval stack is evidence-gated:
@@ -199,11 +205,14 @@ retrieval, explicit freshness guarantees, and eventual cross-corpus queries.
 Deferred work is tracked in `docs/concept/` and `BUILD_STATE.md`. The current
 ordering is:
 
-1. Add a debounced watcher as a latency optimization for keeping embeddings
+1. Collapse the per-corpus servers into a single multi-corpus server with
+   per-request corpus resolution and one `connect` entry
+   (`docs/concept/22_multi_corpus_server.md`).
+2. Add a debounced watcher as a latency optimization for keeping embeddings
    current after query-time self-heal.
-2. Add typed graph edges only where measured queries prove flat retrieval cannot
+3. Add typed graph edges only where measured queries prove flat retrieval cannot
    answer the relationship.
-3. Add federation and specialized vector or storage layers only after local
+4. Add federation and specialized vector or storage layers only after local
    measurements justify them.
 
 ## License
