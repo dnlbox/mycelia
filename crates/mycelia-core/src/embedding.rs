@@ -6,6 +6,8 @@ use std::time::Instant;
 use crate::{ChunkRecord, EmbeddingReport, Error, Result, RetrievalStrategy, SearchHit, store};
 
 const EMBEDDING_BATCH_SIZE: usize = 256;
+// Small first batch so progress appears quickly before the model warms up
+const WARMUP_BATCH_SIZE: usize = 16;
 
 /// Tunable weights for one hybrid blend. Query-class routing selects a profile
 /// per query so symbol lookups stay lexical-first while prose questions lean on
@@ -78,7 +80,11 @@ pub(crate) fn refresh(
         std::io::stderr().flush().ok();
     }
 
-    for batch in missing.chunks(EMBEDDING_BATCH_SIZE) {
+    let warmup = WARMUP_BATCH_SIZE.min(total);
+    let batches =
+        std::iter::once(&missing[..warmup]).chain(missing[warmup..].chunks(EMBEDDING_BATCH_SIZE));
+
+    for batch in batches {
         let texts = batch
             .iter()
             .map(|chunk| chunk.text.clone())
@@ -613,7 +619,7 @@ mod tests {
         fs::create_dir_all(&root).expect("create corpus");
 
         // More than one embedding batch, so the injected failure lands after
-        // the first batch has already been committed.
+        // the warmup batch has already been committed.
         let paragraphs = EMBEDDING_BATCH_SIZE + 40;
         let mut body = String::new();
         for index in 0..paragraphs {
@@ -627,7 +633,7 @@ mod tests {
             .expect("missing")
             .len();
         assert!(
-            total > EMBEDDING_BATCH_SIZE,
+            total > WARMUP_BATCH_SIZE,
             "need more than one batch, got {total}"
         );
 
@@ -635,17 +641,17 @@ mod tests {
         let error = refresh(&database, &mut faulty).expect_err("second batch must fail");
         assert!(matches!(error, Error::EmbeddingProvider(_)));
 
-        // The first batch was upserted before the failure, so it survives.
+        // The warmup batch was upserted before the failure, so it survives.
         assert_eq!(
             store::embedding_count(&database, &model_id).expect("count"),
-            EMBEDDING_BATCH_SIZE
+            WARMUP_BATCH_SIZE
         );
 
         // A clean re-run resumes and embeds only the remainder.
         let mut provider = KeywordProvider;
         let report = refresh(&database, &mut provider).expect("resume refresh");
-        assert_eq!(report.embedded, total - EMBEDDING_BATCH_SIZE);
-        assert_eq!(report.unchanged, EMBEDDING_BATCH_SIZE);
+        assert_eq!(report.embedded, total - WARMUP_BATCH_SIZE);
+        assert_eq!(report.unchanged, WARMUP_BATCH_SIZE);
         assert_eq!(
             store::embedding_count(&database, &model_id).expect("count"),
             total

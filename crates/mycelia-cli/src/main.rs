@@ -112,6 +112,9 @@ enum Command {
     },
     /// Show token-savings statistics aggregated from the activity log.
     Stats {
+        /// Also print the last N find/retrieve log events.
+        #[arg(long, default_value_t = 0)]
+        recent: usize,
         #[command(flatten)]
         target: CwdTarget,
     },
@@ -355,7 +358,7 @@ where
             no_embed,
         } => cmd_setup(path, name, no_embed),
         Command::Connect { harness, target } => cmd_connect(harness, target),
-        Command::Stats { target } => cmd_stats(target),
+        Command::Stats { recent, target } => cmd_stats(target, recent),
         Command::Status { target } => cmd_status(target),
         Command::Refresh { target } => cmd_refresh(target),
         Command::List => cmd_list(),
@@ -719,7 +722,7 @@ fn home_dir() -> Result<PathBuf> {
         .ok_or_else(|| "HOME environment variable is not set".to_string())
 }
 
-fn cmd_stats(target: CwdTarget) -> Result<()> {
+fn cmd_stats(target: CwdTarget, recent: usize) -> Result<()> {
     let resolved = target.resolve()?;
     let corpus_name = resolved.corpus_name.as_deref().unwrap_or("<unnamed>");
     let log_path = resolved
@@ -734,6 +737,7 @@ fn cmd_stats(target: CwdTarget) -> Result<()> {
 
     if stats.queries == 0 {
         println!("(no find queries logged yet. Start a serve session to accumulate data)");
+        print_recent_events(log_path.as_deref(), recent);
         return Ok(());
     }
 
@@ -755,7 +759,26 @@ fn cmd_stats(target: CwdTarget) -> Result<()> {
             stats.cold_tokens.saturating_sub(stats.actual_tokens)
         );
     }
+    print_recent_events(log_path.as_deref(), recent);
     Ok(())
+}
+
+fn print_recent_events(log_path: Option<&Path>, recent: usize) {
+    if recent == 0 {
+        return;
+    }
+    println!();
+    println!("recent activity:");
+    let events = log_path
+        .map(|path| log::recent_events(path, recent))
+        .unwrap_or_default();
+    if events.is_empty() {
+        println!("  (no find/retrieve events logged yet)");
+    } else {
+        for event in events {
+            println!("  {event}");
+        }
+    }
 }
 
 fn cmd_status(target: CwdTarget) -> Result<()> {

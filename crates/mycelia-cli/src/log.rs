@@ -107,6 +107,26 @@ pub(crate) struct StatsReport {
     pub(crate) has_cold: bool,
 }
 
+/// Reads the last `limit` find/retrieve events from the corpus log.
+pub(crate) fn recent_events(log_path: &Path, limit: usize) -> Vec<String> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    let Ok(file) = File::open(log_path) else {
+        return Vec::new();
+    };
+    let mut events = Vec::new();
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        if line.contains("  find ") || line.contains("  retrieve ") {
+            events.push(line);
+            if events.len() > limit {
+                events.remove(0);
+            }
+        }
+    }
+    events
+}
+
 /// Reads aggregate token-savings statistics from the corpus log.
 pub(crate) fn read_stats(log_path: &Path) -> StatsReport {
     let mut report = StatsReport::default();
@@ -269,5 +289,37 @@ mod tests {
         assert_eq!(stats.actual_tokens, 150);
         assert_eq!(stats.cold_tokens, 500);
         assert!(stats.has_cold);
+    }
+
+    #[test]
+    fn recent_events_returns_tail_of_find_and_retrieve_lines() {
+        use tempfile::NamedTempFile;
+        let mut tmp = NamedTempFile::new().expect("tempfile");
+        writeln!(
+            tmp,
+            "2026-06-26 09:14:02  serve start  model=test  embeddings=current"
+        )
+        .expect("write");
+        writeln!(
+            tmp,
+            "2026-06-26 09:14:09  find         q=\"a\"  results=3  actual_tok=100"
+        )
+        .expect("write");
+        writeln!(
+            tmp,
+            "2026-06-26 09:15:21  retrieve     chunk=abc  path=foo.rs"
+        )
+        .expect("write");
+        writeln!(
+            tmp,
+            "2026-06-26 09:16:09  find         q=\"b\"  results=1  actual_tok=50"
+        )
+        .expect("write");
+        tmp.flush().expect("flush");
+
+        let events = recent_events(tmp.path(), 2);
+        assert_eq!(events.len(), 2);
+        assert!(events[0].contains("  retrieve "));
+        assert!(events[1].contains("q=\"b\""));
     }
 }

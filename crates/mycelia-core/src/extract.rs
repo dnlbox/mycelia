@@ -6,6 +6,7 @@ const EXTRACTOR_RUST: &str = "tree-sitter-rust-v1";
 const EXTRACTOR_TS: &str = "tree-sitter-typescript-v1";
 const EXTRACTOR_TSX: &str = "tree-sitter-tsx-v1";
 const EXTRACTOR_PY: &str = "tree-sitter-python-v1";
+const EXTRACTOR_RUBY: &str = "tree-sitter-ruby-v1";
 
 const TOP_LEVEL_KINDS_RUST: &[&str] = &[
     "function_item",
@@ -38,6 +39,14 @@ const TOP_LEVEL_KINDS_PY: &[&str] = &[
     "decorated_definition",
 ];
 
+const TOP_LEVEL_KINDS_RUBY: &[&str] = &[
+    "method",
+    "singleton_method",
+    "class",
+    "module",
+    "singleton_class",
+];
+
 /// Returns the extractor identifier that will be attempted for `source_path`.
 /// This reflects intent (based on file extension), not which extractor succeeded.
 pub(crate) fn extractor_id_for(source_path: &str) -> &'static str {
@@ -49,6 +58,8 @@ pub(crate) fn extractor_id_for(source_path: &str) -> &'static str {
         EXTRACTOR_TSX
     } else if source_path.ends_with(".py") {
         EXTRACTOR_PY
+    } else if source_path.ends_with(".rb") {
+        EXTRACTOR_RUBY
     } else {
         EXTRACTOR_PLAIN
     }
@@ -83,6 +94,12 @@ pub(crate) fn extract_text(source_path: &str, source_hash: &str, text: &str) -> 
     }
     if source_path.ends_with(".py") {
         if let Some(chunks) = extract_python(source_path, source_hash, text) {
+            return (chunks, false);
+        }
+        return (extract_plain_text(source_path, source_hash, text), true);
+    }
+    if source_path.ends_with(".rb") {
+        if let Some(chunks) = extract_ruby(source_path, source_hash, text) {
             return (chunks, false);
         }
         return (extract_plain_text(source_path, source_hash, text), true);
@@ -265,6 +282,70 @@ fn extract_python(source_path: &str, source_hash: &str, text: &str) -> Option<Ve
             },
             text: text[byte_start..byte_end].to_owned(),
             extractor: EXTRACTOR_PY,
+        });
+    }
+
+    if chunks.is_empty() {
+        return None;
+    }
+    Some(chunks)
+}
+
+fn extract_ruby(source_path: &str, source_hash: &str, text: &str) -> Option<Vec<Chunk>> {
+    let language: tree_sitter::Language = tree_sitter_ruby::LANGUAGE.into();
+    let mut parser = tree_sitter::Parser::new();
+    parser.set_language(&language).ok()?;
+
+    let tree = parser.parse(text, None)?;
+    let root = tree.root_node();
+
+    let mut walk = root.walk();
+    let children: Vec<tree_sitter::Node<'_>> = root.named_children(&mut walk).collect();
+
+    let line_index = LineIndex::new(text);
+    let mut chunks = Vec::new();
+
+    for (i, node) in children.iter().enumerate() {
+        if node.is_error() || !TOP_LEVEL_KINDS_RUBY.contains(&node.kind()) {
+            continue;
+        }
+
+        // Walk backwards to collect contiguous leading `#` comment lines.
+        let mut doc_byte_start = node.start_byte();
+        let mut next_row = node.start_position().row;
+        let mut j = i;
+        while j > 0 {
+            j -= 1;
+            let candidate = &children[j];
+            if candidate.kind() != "comment" {
+                break;
+            }
+            // The comment must be immediately before the next item — no blank line.
+            // Ruby comment nodes do not include the trailing newline, so a comment
+            // on row L has end_row=L; the next item is adjacent when it starts on L+1.
+            let candidate_end_row = candidate.end_position().row;
+            if next_row > candidate_end_row + 1 {
+                break;
+            }
+            doc_byte_start = candidate.start_byte();
+            next_row = candidate.start_position().row;
+        }
+
+        let byte_start = doc_byte_start;
+        let byte_end = node.end_byte();
+
+        chunks.push(Chunk {
+            id: chunk_id(source_path, source_hash, byte_start, byte_end),
+            source_path: source_path.to_owned(),
+            source_hash: source_hash.to_owned(),
+            span: SourceSpan {
+                byte_start,
+                byte_end,
+                line_start: line_index.line_at_start(byte_start),
+                line_end: line_index.line_at_end(text, byte_end),
+            },
+            text: text[byte_start..byte_end].to_owned(),
+            extractor: EXTRACTOR_RUBY,
         });
     }
 
@@ -767,5 +848,96 @@ async def create_run(request: Request) -> Response:
         assert_eq!(chunks.len(), 1);
         assert!(chunks[0].text.starts_with("@router.post"));
         assert!(chunks[0].text.contains("async def create_run"));
+    }
+
+    // --- tree-sitter Ruby extractor tests ---
+
+    #[test]
+    fn extractor_id_for_ruby() {
+        assert_eq!(extractor_id_for("app/models/user.rb"), EXTRACTOR_RUBY);
+        assert_eq!(extractor_id_for("lib/runner.rb"), EXTRACTOR_RUBY);
+    }
+
+    #[test]
+    fn extracts_top_level_ruby_methods_and_classes() {
+        let src = r#"def greet(name)
+  "Hello, #{name}!"
+end
+
+class User
+  def initialize(name)
+    @name = name
+  end
+end
+"#;
+        let (chunks, fallback) = extract_text("app.rb", "hash", src);
+        assert!(!fallback);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[0].text.contains("def greet"));
+        assert!(chunks[1].text.contains("class User"));
+        assert_eq!(chunks[0].extractor, EXTRACTOR_RUBY);
+    }
+
+    #[test]
+    fn ruby_extracts_module() {
+        let src = r#"module Payments
+  def self.charge(amount)
+    # ...
+  end
+end
+"#;
+        let (chunks, fallback) = extract_text("payments.rb", "hash", src);
+        assert!(!fallback);
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].text.contains("module Payments"));
+    }
+
+    #[test]
+    fn ruby_extracts_singleton_method() {
+        let src = r#"def self.find(id)
+  DB.query(id)
+end
+"#;
+        let (chunks, fallback) = extract_text("record.rb", "hash", src);
+        assert!(!fallback);
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].text.contains("def self.find"));
+    }
+
+    #[test]
+    fn ruby_includes_leading_comment_block() {
+        let src = r#"# Returns a greeting string.
+# Accepts any name.
+def greet(name)
+  "Hello, #{name}!"
+end
+"#;
+        let (chunks, fallback) = extract_text("greeter.rb", "hash", src);
+        assert!(!fallback);
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].text.starts_with("# Returns a greeting string."));
+        assert!(chunks[0].text.contains("def greet"));
+        assert_eq!(chunks[0].span.line_start, 1);
+    }
+
+    #[test]
+    fn ruby_comment_separated_by_blank_line_not_included() {
+        let src = r#"# This comment has a blank line below it.
+
+def greet(name)
+  "Hello, #{name}!"
+end
+"#;
+        let (chunks, _) = extract_text("greeter.rb", "hash", src);
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].text.starts_with("def greet"));
+    }
+
+    #[test]
+    fn ruby_chunk_ids_are_deterministic() {
+        let src = "def foo\n  42\nend\n";
+        let (first, _) = extract_text("a.rb", "hash", src);
+        let (second, _) = extract_text("a.rb", "hash", src);
+        assert_eq!(first[0].id, second[0].id);
     }
 }

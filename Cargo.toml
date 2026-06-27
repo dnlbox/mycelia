@@ -12,6 +12,7 @@ rust-version = "1.92"
 blake3 = "1.8.5"
 tree-sitter = "0.25"
 tree-sitter-python = "0.25.0"
+tree-sitter-ruby = "0.23.1"
 tree-sitter-rust = "0.24"
 tree-sitter-typescript = "0.23.2"
 clap = { version = "4.6.1", features = ["derive"] }

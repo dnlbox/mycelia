@@ -5,13 +5,15 @@ Agent working area. A fresh session reads this top to bottom, then follows
 
 ## Now
 
-- Latest slice: `setup`/`refresh`/`embed` progress now names the embedding model
-  preparation phase before batch counters begin, then summarizes embedded,
-  unchanged, and stored bytes.
-- Latest CLI polish: `connect` now exposes supported harnesses in help, bare
-  `mycelia connect`, and invalid-harness errors.
-- Validation: fmt, clippy, CLI tests, full workspace tests, release build,
-  fixture setup/find smoke, and live `refresh --corpus forge` progress check.
+- Latest slice: MCP adoption surface now explains Mycelia as the
+  token-efficient orientation path, exposes `search_codebase` and
+  `locate_implementation` aliases over the same read-only find path, and adds
+  `stats --recent N` for quick adoption checks.
+- Validation: fmt, clippy, focused MCP stdio test, CLI crate tests, and full
+  workspace tests pass.
+- Parallel context: Ruby tree-sitter extraction support is present in the
+  current dirty tree from the adjacent Claude Desktop run and passed the full
+  workspace test suite.
 - Milestone: slice `21` distribution readiness SHIPPED. AGENTS.md and concept
   `21` are reconciled to cargo/curl quick installs, tap staging, and official
   Homebrew/core later.
@@ -144,6 +146,10 @@ Agent working area. A fresh session reads this top to bottom, then follows
 - 2026-06-26: Improved setup/refresh/embed progress: model preparation is now
   visible before embedding batch counters, batch progress is labeled
   `Embedding chunks`, and completion summarizes embedded/unchanged/storage.
+- 2026-06-26: Improved MCP adoption affordance without harness hooks:
+  efficiency-first tool descriptions/instructions, aliases `search_codebase` and
+  `locate_implementation`, and `stats --recent` for checking whether agents are
+  actually using Mycelia.
 - 2026-06-26: Improved `connect` discoverability: supported harnesses are typed
   CLI values shown by `connect --help`, bare `connect`, and invalid harness
   errors.

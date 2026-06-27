@@ -36,6 +36,8 @@ struct RetrieveRequest {
     chunk_id: String,
 }
 
+const SERVER_INSTRUCTIONS: &str = "Mycelia is the token-efficient orientation path for this bound corpus. For questions like where something is implemented, what supports a feature or language, which files touch an area, or which symbol defines behavior, call find first. Use retrieve only for the selected chunk ids that look relevant. Shell grep/read remain useful follow-up tools for exact line edits after Mycelia has narrowed the search.";
+
 #[derive(Clone)]
 struct MyceliaServer {
     database: PathBuf,
@@ -79,14 +81,8 @@ impl MyceliaServer {
         }
         .map_err(|error| error.to_string())
     }
-}
 
-#[tool_router]
-impl MyceliaServer {
-    #[tool(
-        description = "Search the configured Mycelia index and return ranked headers without chunk bodies"
-    )]
-    fn find(&self, Parameters(request): Parameters<FindRequest>) -> McpToolResult<String> {
+    fn search_json(&self, request: &FindRequest) -> McpToolResult<String> {
         let headers = self.find_headers(&request.query, request.limit)?;
 
         // Validate the sources behind the returned headers against disk. If any
@@ -118,9 +114,39 @@ impl MyceliaServer {
 
         serde_json::to_string(&headers).map_err(|error| error.to_string())
     }
+}
+
+#[tool_router]
+impl MyceliaServer {
+    #[tool(
+        description = "Cheap first-pass codebase orientation over the configured Mycelia index. Use before grep/read when locating implementations, supported features, related files, symbols, or concepts in this corpus. Returns ranked source headers with paths, line ranges, signatures or synopses, scores, and chunk ids without opening full files."
+    )]
+    fn find(&self, Parameters(request): Parameters<FindRequest>) -> McpToolResult<String> {
+        self.search_json(&request)
+    }
 
     #[tool(
-        description = "Retrieve one exact sourced chunk from the configured Mycelia index by identifier"
+        description = "Alias for find with a more explicit name: search the indexed codebase before grep/read to cheaply locate relevant files, symbols, features, or implementation areas."
+    )]
+    fn search_codebase(
+        &self,
+        Parameters(request): Parameters<FindRequest>,
+    ) -> McpToolResult<String> {
+        self.search_json(&request)
+    }
+
+    #[tool(
+        description = "Alias for find tuned for implementation hunts. Use for questions like where is X implemented, what supports Y, or which source chunks define a feature before opening raw files."
+    )]
+    fn locate_implementation(
+        &self,
+        Parameters(request): Parameters<FindRequest>,
+    ) -> McpToolResult<String> {
+        self.search_json(&request)
+    }
+
+    #[tool(
+        description = "Fetch the exact body for one chunk id selected from a prior Mycelia search result. Use after find/search_codebase/locate_implementation has identified the specific source chunk worth reading."
     )]
     fn retrieve(&self, Parameters(request): Parameters<RetrieveRequest>) -> McpToolResult<String> {
         // Fresh sources return the precise chunk; a changed source returns the
@@ -172,9 +198,7 @@ impl ServerHandler for MyceliaServer {
                 Implementation::new("mycelia", env!("CARGO_PKG_VERSION"))
                     .with_title("Mycelia local knowledge index"),
             )
-            .with_instructions(
-                "Use find to inspect sourced headers, then retrieve the chosen chunk body.",
-            )
+            .with_instructions(SERVER_INSTRUCTIONS)
     }
 }
 

@@ -557,6 +557,13 @@ fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
     );
     let initialized = read_json_line(&mut stdout);
     assert_eq!(initialized["result"]["serverInfo"]["name"], "mycelia");
+    let instructions = initialized["result"]["instructions"]
+        .as_str()
+        .expect("server instructions");
+    assert!(
+        instructions.contains("token-efficient orientation path"),
+        "instructions should explain why to use Mycelia first:\n{instructions}"
+    );
 
     write_json_line(
         &mut stdin,
@@ -575,13 +582,31 @@ fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
         }),
     );
     let tools = read_json_line(&mut stdout);
-    let names = tools["result"]["tools"]
-        .as_array()
-        .expect("tools array")
+    let listed_tools = tools["result"]["tools"].as_array().expect("tools array");
+    let names = listed_tools
         .iter()
         .map(|tool| tool["name"].as_str().expect("tool name"))
         .collect::<Vec<_>>();
-    assert_eq!(names, vec!["find", "retrieve"]);
+    for expected in [
+        "find",
+        "search_codebase",
+        "locate_implementation",
+        "retrieve",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "missing MCP tool {expected}; got {names:?}"
+        );
+    }
+    let find_description = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "find")
+        .and_then(|tool| tool["description"].as_str())
+        .expect("find description");
+    assert!(
+        find_description.contains("before grep/read"),
+        "find description should position Mycelia as the cheap orientation path:\n{find_description}"
+    );
 
     write_json_line(
         &mut stdin,
@@ -606,6 +631,28 @@ fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
     assert!(content.contains("\"chunk_id\""));
     assert!(!content.contains("\"text\""));
 
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "search_codebase",
+                "arguments": {
+                    "query": "precise",
+                    "limit": 5
+                }
+            }
+        }),
+    );
+    let alias_result = read_json_line(&mut stdout);
+    let alias_content = alias_result["result"]["content"][0]["text"]
+        .as_str()
+        .expect("alias text content");
+    assert!(alias_content.contains("\"source_path\":\"notes.txt\""));
+    assert!(alias_content.contains("\"chunk_id\""));
+
     drop(stdin);
     let status = child.wait().expect("wait for MCP server");
     let mut stderr = String::new();
@@ -616,6 +663,16 @@ fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
         .read_to_string(&mut stderr)
         .expect("read MCP stderr");
     assert!(status.success(), "MCP server failed:\n{stderr}");
+
+    let stats = run_success_with_homes(
+        &["stats", "--recent", "2", "--corpus", "forge"],
+        &config_home,
+        &data_home,
+    );
+    assert!(stats.contains("queries answered:  2"));
+    assert!(stats.contains("recent activity:"));
+    assert!(stats.contains("  find "));
+    assert!(stats.contains("q=\"precise\""));
 }
 
 #[test]
