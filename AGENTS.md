@@ -164,6 +164,8 @@ Run these gates in order:
   panic.
 - Bump the extractor identifier when chunk boundaries change so stale chunks and
   their embeddings invalidate; embed the symbol unit, not a raw byte slice.
+- Exclude evaluation manifests from corpus discovery. They contain queries and
+  expected sources, so indexing them contaminates measured retrieval quality.
 - `find` returns distilled headers (path, line range, signature or synopsis,
   score, chunk id) under a result token budget; `retrieve` returns the full body.
   Gate retrieval changes on tokens per answered query, not only hit rate and MRR.

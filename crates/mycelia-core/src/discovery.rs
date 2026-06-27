@@ -30,7 +30,10 @@ pub(crate) fn discover(root: &Path) -> Result<Discovery> {
 
     for entry in builder.build() {
         match entry {
-            Ok(entry) if entry.file_type().is_some_and(|kind| kind.is_file()) => {
+            Ok(entry)
+                if entry.file_type().is_some_and(|kind| kind.is_file())
+                    && !is_evaluation_manifest(entry.path()) =>
+            {
                 files.push(entry.into_path());
             }
             Ok(_) => {}
@@ -40,6 +43,25 @@ pub(crate) fn discover(root: &Path) -> Result<Discovery> {
 
     files.sort();
     Ok(Discovery { files, rejected })
+}
+
+fn is_evaluation_manifest(path: &Path) -> bool {
+    if path.extension().and_then(|value| value.to_str()) != Some("json") {
+        return false;
+    }
+
+    let mut previous_was_fixtures = false;
+    for component in path.components() {
+        let Component::Normal(name) = component else {
+            previous_was_fixtures = false;
+            continue;
+        };
+        if previous_was_fixtures && name == "eval" {
+            return true;
+        }
+        previous_was_fixtures = name == "fixtures";
+    }
+    false
 }
 
 fn contains_vcs_metadata(path: &Path) -> bool {
@@ -69,6 +91,14 @@ mod tests {
         fs::write(directory.path().join("ignored.txt"), "ignored").expect("write ignored");
         fs::create_dir(directory.path().join(".hidden")).expect("create hidden");
         fs::write(directory.path().join(".hidden/kept.txt"), "kept").expect("write hidden");
+        fs::create_dir_all(directory.path().join("fixtures/eval")).expect("create eval fixtures");
+        fs::write(
+            directory.path().join("fixtures/eval/manifest.json"),
+            r#"{"cases":[]}"#,
+        )
+        .expect("write eval manifest");
+        fs::create_dir_all(directory.path().join("fixtures/smoke")).expect("create smoke fixtures");
+        fs::write(directory.path().join("fixtures/smoke/v1.json"), "{}").expect("write smoke json");
         fs::create_dir(directory.path().join(".git")).expect("create git metadata");
         fs::write(directory.path().join(".git/config"), "secret").expect("write git config");
 
@@ -85,6 +115,7 @@ mod tests {
                 Path::new(".gitignore"),
                 Path::new(".hidden/kept.txt"),
                 Path::new("a.txt"),
+                Path::new("fixtures/smoke/v1.json"),
                 Path::new("z.txt")
             ]
         );

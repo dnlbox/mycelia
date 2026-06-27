@@ -188,6 +188,6 @@ integration test.
   Claude Desktop, and Cursor config writers remove legacy `mycelia-<name>`
   entries when updating their files.
 - Validation: fmt, clippy, full workspace tests, release build, and a
-  release-binary two-corpus MCP smoke passed. The refreshed Forge retrieval gate
-  drifted to 47/68 after indexing the current tree; see `BUILD_STATE.md` for the
-  follow-up.
+  release-binary two-corpus MCP smoke passed. A follow-up repair excluded eval
+  manifests from discovery and restored the refreshed Forge routed gate to 51/68
+  on the current tree.

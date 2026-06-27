@@ -42,6 +42,11 @@ The evaluator also returns each case's first relevant rank. These metrics are
 baseline signals, not proof of semantic quality. Manifests must represent real
 questions and include failure-oriented cases before they guide architecture.
 
+Evaluation manifests are oracle data, not corpus data. Discovery excludes
+`fixtures/eval/*.json` manifests because they contain the query text and expected
+sources; indexing them lets the retriever answer the test by reading the answer
+key instead of the corpus.
+
 ### Tokens per answered query (the product metric)
 
 Hit rate and MRR are proxies. The measure that justifies the index is the tokens

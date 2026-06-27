@@ -34,12 +34,12 @@ queries. Recent measured results on the refreshed local Forge corpus:
 
 | Strategy | Hits | Tokens per answer |
 | --- | ---: | ---: |
-| `fts5-reranked` | 46 / 68 | see `BUILD_STATE.md` |
-| `routed` | 47 / 68 | see `BUILD_STATE.md` |
+| `fts5-reranked` | 47 / 68 | 1302.2 |
+| `routed` | 51 / 68 | 1275.3 |
 
-This is below the prior 52/68 routed checkpoint after refreshing the live Forge
-index on the current tree. `BUILD_STATE.md` records that drift as the next
-diagnostic slice rather than treating it as a retrieval-default decision.
+The latest repair excludes evaluation manifests from corpus discovery so the
+retriever cannot answer tests from oracle query/answer files. `BUILD_STATE.md`
+records the remaining misses and gate caveats.
 
 `routed` is the CLI default and the MCP default when embeddings are available. It
 falls back to reranked FTS5 when a corpus has no embeddings or the cached model is
@@ -211,8 +211,8 @@ retrieval, explicit freshness guarantees, and eventual cross-corpus queries.
 Deferred work is tracked in `docs/concept/` and `BUILD_STATE.md`. The current
 ordering is:
 
-1. Investigate the refreshed Forge retrieval gate drift recorded in
-   `BUILD_STATE.md` before changing retrieval defaults.
+1. Improve retrieval quality on the remaining 68-case Forge misses, but only if
+   the token-per-answer gate holds.
 2. Add a debounced watcher as a latency optimization for keeping embeddings
    current after query-time self-heal.
 3. Add typed graph edges only where measured queries prove flat retrieval cannot

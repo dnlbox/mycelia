@@ -238,9 +238,8 @@ Validation on the release binary:
   plus per-corpus activity lines to the corpus logs.
 - `stats` aggregated the logged query.
 - Refreshed `forge`: 12,357 chunks, 12,357 embeddings, 50.4 MB database.
-- Current 68-case gate on refreshed `forge` after the multi-corpus server slice:
-  routed 47/68 on the current tree. This is below the prior 52/68 checkpoint and
-  is recorded in `BUILD_STATE.md` as a follow-up diagnostic slice.
+- Current 68-case gate on refreshed `forge` after excluding eval manifests from
+  discovery: routed 51/68 on the current tree.
 
 ## Deferred
 
