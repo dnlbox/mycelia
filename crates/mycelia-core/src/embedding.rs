@@ -74,7 +74,7 @@ pub(crate) fn refresh(
     let mut embedded = 0usize;
 
     if total > 0 {
-        eprint!("embedding 0/{total}...");
+        eprint!("Embedding chunks: 0/{total}...");
         std::io::stderr().flush().ok();
     }
 
@@ -101,7 +101,7 @@ pub(crate) fn refresh(
             .collect::<Result<Vec<_>>>()?;
         store::upsert_embedding_batch(database, model_id.as_str(), dimensions, pairs.as_slice())?;
         embedded += batch.len();
-        eprint!("\rembedding {embedded}/{total}...");
+        eprint!("\rEmbedding chunks: {embedded}/{total}...");
         std::io::stderr().flush().ok();
     }
 

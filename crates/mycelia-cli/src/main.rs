@@ -416,8 +416,7 @@ where
 
         Command::Embed { target, json } => {
             let database = target.resolve_database()?;
-            let mut provider =
-                semantic::FastEmbedProvider::prepare(&database).map_err(|e| e.to_string())?;
+            let mut provider = prepare_embedding_provider(&database)?;
             let report = mycelia_core::refresh_embeddings(&database, &mut provider)
                 .map_err(|e| e.to_string())?;
             emit_output(if json {
@@ -438,6 +437,15 @@ where
             )
         }
     }
+}
+
+fn prepare_embedding_provider(database: &Path) -> Result<semantic::FastEmbedProvider> {
+    eprintln!("Preparing embedding model...");
+    eprintln!("  model: {}", semantic::MODEL_ID);
+    eprintln!("  loading ONNX Runtime and model weights; first run may download model files");
+    let provider = semantic::FastEmbedProvider::prepare(database).map_err(|e| e.to_string())?;
+    eprintln!("  model ready");
+    Ok(provider)
 }
 
 // Journey commands
@@ -495,11 +503,15 @@ fn cmd_setup(path: Option<PathBuf>, name_flag: Option<String>, no_embed: bool) -
     );
 
     if !no_embed {
-        eprintln!("Embedding...");
-        let mut provider =
-            semantic::FastEmbedProvider::prepare(&profile.database).map_err(|e| e.to_string())?;
-        mycelia_core::refresh_embeddings(&profile.database, &mut provider)
+        let mut provider = prepare_embedding_provider(&profile.database)?;
+        let report = mycelia_core::refresh_embeddings(&profile.database, &mut provider)
             .map_err(|e| e.to_string())?;
+        eprintln!(
+            "  {} embedded, {} unchanged, {} stored",
+            report.embedded,
+            report.unchanged,
+            format_bytes(report.storage_bytes as u64)
+        );
     }
 
     eprintln!("Done. Run `mycelia connect <harness>` to wire it into your AI tool.");
@@ -789,11 +801,15 @@ fn cmd_refresh(target: CwdTarget) -> Result<()> {
         "  {} chunks from {} files ({} removed, {} rejected)",
         report.chunks_written, report.indexed, report.removed, report.rejected
     );
-    eprintln!("Embedding...");
-    let mut provider =
-        semantic::FastEmbedProvider::prepare(&resolved.database).map_err(|e| e.to_string())?;
-    mycelia_core::refresh_embeddings(&resolved.database, &mut provider)
+    let mut provider = prepare_embedding_provider(&resolved.database)?;
+    let embedding_report = mycelia_core::refresh_embeddings(&resolved.database, &mut provider)
         .map_err(|e| e.to_string())?;
+    eprintln!(
+        "  {} embedded, {} unchanged, {} stored",
+        embedding_report.embedded,
+        embedding_report.unchanged,
+        format_bytes(embedding_report.storage_bytes as u64)
+    );
     eprintln!("Done.");
     Ok(())
 }
