@@ -173,8 +173,27 @@ fn find_fts5_reranked(database: &Path, query: &str, limit: usize) -> Result<Vec<
                 .then_with(|| left.chunk.id.cmp(&right.chunk.id))
         },
     );
-    ranked.truncate(limit);
-    Ok(ranked.into_iter().map(|(hit, _, _, _)| hit).collect())
+    Ok(truncate_unique_text_hits(
+        ranked
+            .into_iter()
+            .map(|(hit, _, _, _)| hit)
+            .collect::<Vec<_>>(),
+        limit,
+    ))
+}
+
+pub(crate) fn truncate_unique_text_hits(hits: Vec<SearchHit>, limit: usize) -> Vec<SearchHit> {
+    let mut seen = BTreeSet::new();
+    let mut unique = Vec::new();
+    for hit in hits {
+        if seen.insert(hit.chunk.text.clone()) {
+            unique.push(hit);
+            if unique.len() == limit {
+                break;
+            }
+        }
+    }
+    unique
 }
 
 fn find_fts5_candidates(database: &Path, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
@@ -1933,6 +1952,36 @@ mod tests {
         .expect("reranked hits");
 
         assert_eq!(hits[0].chunk.source_path, "body.txt");
+    }
+
+    #[test]
+    fn reranker_deduplicates_identical_chunk_texts() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("corpus");
+        let database = temp.path().join("mycelia.sqlite3");
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            write_text_file(
+                root.join(name).as_path(),
+                "workspace child contract repeated boilerplate",
+            );
+        }
+        write_text_file(
+            root.join("z.txt").as_path(),
+            "workspace child contract specific answer",
+        );
+        index_fixture(root.as_path(), database.as_path()).expect("index corpus");
+
+        let hits = find(
+            database.as_path(),
+            "workspace child contract",
+            2,
+            RetrievalStrategy::Fts5Reranked,
+        )
+        .expect("reranked hits");
+
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].chunk.source_path, "a.txt");
+        assert_eq!(hits[1].chunk.source_path, "z.txt");
     }
 
     #[test]

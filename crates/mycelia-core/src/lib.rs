@@ -222,8 +222,11 @@ mod tests {
         let database = temp.path().join("index.sqlite3");
         fs::create_dir_all(&root).expect("create corpus");
         for index in 0..60 {
-            fs::write(root.join(format!("note-{index}.txt")), "shared needle")
-                .expect("write corpus file");
+            fs::write(
+                root.join(format!("note-{index}.txt")),
+                format!("shared needle {index}"),
+            )
+            .expect("write corpus file");
         }
         crate::index_corpus(root.as_path(), database.as_path()).expect("index corpus");
 
@@ -232,6 +235,6 @@ mod tests {
         assert_eq!(headers.len(), 50);
         assert_eq!(headers[0].source_path, "note-0.txt");
         assert_eq!(headers[0].signature, None);
-        assert_eq!(headers[0].synopsis, "shared needle");
+        assert_eq!(headers[0].synopsis, "shared needle 0");
     }
 }

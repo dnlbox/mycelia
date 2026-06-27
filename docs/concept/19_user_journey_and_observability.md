@@ -239,7 +239,8 @@ Validation on the release binary:
 - `stats` aggregated the logged query.
 - Refreshed `forge`: 12,357 chunks, 12,357 embeddings, 50.4 MB database.
 - Current 68-case gate on refreshed `forge` after excluding eval manifests from
-  discovery: routed 51/68 on the current tree.
+  discovery and collapsing exact duplicate chunk bodies in limited ranked
+  headers: routed 52/68, fts5-reranked 48/68 on the current tree.
 
 ## Deferred
 

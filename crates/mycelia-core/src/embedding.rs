@@ -373,8 +373,7 @@ fn find_hybrid(
             .into_iter()
             .map(|candidate| candidate.into_hit(profile.vector_weight)),
     );
-    hits.truncate(limit);
-    Ok(hits)
+    Ok(store::truncate_unique_text_hits(hits, limit))
 }
 
 #[derive(Debug)]

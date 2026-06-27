@@ -5,7 +5,21 @@ Agent working area. A fresh session reads this top to bottom, then follows
 
 ## Now
 
-- Latest slice: refreshed Forge gate drift DIAGNOSED and repaired.
+- Latest slice: duplicate-body header compaction SHIPPED for ranked retrieval.
+- Implemented: `fts5-reranked` and routed final headers collapse exact duplicate
+  chunk bodies after scoring, keeping the first ranked copy and filling the
+  result budget with the next distinct candidate. This prevents cloned
+  boilerplate from crowding out useful results under small limits.
+- Rejected: source-path token weighting. It recovered one expanded case but lost
+  an established baseline hit and worsened tokens per answer, so it did not meet
+  the slice gate.
+- Validation: focused duplicate regression, fmt, clippy, full workspace tests,
+  release build, release-binary Forge refresh, and 68-case eval pass. Current
+  measured gate after final protocol-text refresh: routed 52/68
+  (baseline 37/40 @ 1076.4 tokens/answer, expanded 13/18 @ 1939.0,
+  paraphrase 2/10 @ 651.5; weighted aggregate 1275.7). fts5-reranked is 48/68 at
+  weighted 1302.1.
+- Previous slice: refreshed Forge gate drift DIAGNOSED and repaired.
 - Root cause: `fixtures/eval/*.json` oracle manifests were being indexed into
   the Forge corpus, so query text and expected source paths could outrank the
   actual corpus. Discovery now excludes evaluation manifests while preserving
@@ -175,9 +189,18 @@ Agent working area. A fresh session reads this top to bottom, then follows
   deferral threshold, hiding Mycelia behind a search the model never runs; grep is
   an always-loaded substitute, so aliases and server instructions never load while
   deferred.
+- 2026-06-27: Collapse exact duplicate chunk bodies in limited ranked headers
+  after scoring. This is a token-budget compaction, not a ranking weight: the
+  first ranked copy wins, and the next distinct candidate fills the result set.
+  Reject source-path token weighting for now because it traded away established
+  hits and worsened tokens per answer.
 
 ## Session log
 
+- 2026-06-27: Shipped duplicate-body header compaction for `fts5-reranked` and
+  routed retrieval. It fixes cloned-boilerplate crowding in top-K headers and
+  improves the current refreshed Forge gate to fts5-reranked 48/68 and routed
+  52/68. Source-path token weighting was tested and rejected.
 - 2026-06-27: Diagnosed and repaired Forge gate drift. Evaluation manifests under
   `fixtures/eval/*.json` were indexed into the live Forge corpus, contaminating
   retrieval with oracle query/answer text. Discovery now excludes eval manifests;

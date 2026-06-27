@@ -34,12 +34,13 @@ queries. Recent measured results on the refreshed local Forge corpus:
 
 | Strategy | Hits | Tokens per answer |
 | --- | ---: | ---: |
-| `fts5-reranked` | 47 / 68 | 1302.2 |
-| `routed` | 51 / 68 | 1275.3 |
+| `fts5-reranked` | 48 / 68 | 1302.1 |
+| `routed` | 52 / 68 | 1275.7 |
 
-The latest repair excludes evaluation manifests from corpus discovery so the
-retriever cannot answer tests from oracle query/answer files. `BUILD_STATE.md`
-records the remaining misses and gate caveats.
+The latest repairs exclude evaluation manifests from corpus discovery and collapse
+exact duplicate chunk bodies in limited ranked headers. The duplicate collapse
+keeps cloned boilerplate from crowding out the next distinct candidate.
+`BUILD_STATE.md` records the remaining misses and gate caveats.
 
 `routed` is the CLI default and the MCP default when embeddings are available. It
 falls back to reranked FTS5 when a corpus has no embeddings or the cached model is

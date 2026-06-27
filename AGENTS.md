@@ -89,7 +89,9 @@ provider-less sync API. The stdio MCP server also routes by default behind a
 shared lazy provider; `serve --lexical` or a model-load failure degrades it to
 reranked FTS5 (`18`, `22`). The reranker rewards
 signature-line coverage for identifier-shaped query terms so symbol definitions
-outrank references (`17`). Code-aware tree-sitter
+outrank references (`17`) and collapses exact duplicate chunk bodies in limited
+ranked headers so cloned boilerplate does not crowd out distinct candidates.
+Code-aware tree-sitter
 chunking (`docs/concept/09`), a distilled two-stage MCP surface measured in tokens
 per answered query (`10`), and a precision-first hybrid re-measured over clean
 chunks (`11`) are now in place. A local no-cost Graphify bakeoff (`12`) found
