@@ -132,7 +132,7 @@ fn connect_help_lists_supported_harnesses() {
         "missing supported harness list:\n{stdout}"
     );
     assert!(
-        stdout.contains("[possible values: codex, claude-code, claude-desktop, cursor]"),
+        stdout.contains("[possible values: codex, claude-code, claude-desktop, cursor, antigravity, opencode, kilo]"),
         "missing possible values:\n{stdout}"
     );
 }
@@ -536,6 +536,55 @@ fn connect_codex_writes_idempotent_mcp_server_config() {
     assert_eq!(config.matches("[mcp_servers.mycelia-forge]").count(), 0);
     assert!(config.contains("command = "));
     assert!(config.contains("args = [\"serve\", \"--corpus\", \"forge\"]"));
+}
+
+#[test]
+fn connect_new_harnesses_writes_mcp_server_config() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path().join("corpus");
+    let config_home = temp.path().join("config");
+    let data_home = temp.path().join("data");
+    let home = temp.path().join("home");
+    fs::create_dir_all(&root).expect("create corpus");
+    write_file(&root.join("notes.txt"), "hello world");
+
+    let setup = Command::new(bin_path())
+        .args([
+            "setup",
+            root.to_str().expect("root path"),
+            "--name",
+            "forge",
+            "--no-embed",
+        ])
+        .env("MYCELIA_CONFIG_HOME", &config_home)
+        .env("MYCELIA_DATA_HOME", &data_home)
+        .env("HOME", &home)
+        .output()
+        .expect("run setup");
+    assert!(setup.status.success());
+
+    for harness in ["antigravity", "opencode", "kilo"] {
+        let output = Command::new(bin_path())
+            .args(["connect", harness, "--corpus", "forge"])
+            .env("MYCELIA_CONFIG_HOME", &config_home)
+            .env("MYCELIA_DATA_HOME", &data_home)
+            .env("HOME", &home)
+            .output()
+            .expect("run connect");
+        assert!(
+            output.status.success(),
+            "connect {} failed:\n{}",
+            harness,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    assert!(home.join(".gemini/antigravity/mcp_config.json").is_file());
+    assert!(home.join(".config/opencode/opencode.json").is_file());
+    assert!(home.join(".config/kilo/kilo.json").is_file());
+
+    let agy = fs::read_to_string(home.join(".gemini/antigravity/mcp_config.json")).unwrap();
+    assert!(agy.contains("\"mycelia\""));
 }
 
 #[test]

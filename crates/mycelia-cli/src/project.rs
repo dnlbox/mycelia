@@ -64,26 +64,198 @@ pub(crate) fn init_project(root: &Path, name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Returns paths of `AGENTS.md` and `CLAUDE.md` that exist directly at `root`.
+/// Strips `//` and `/* */` comments from JSON/JSONC text so serde_json can parse it.
+pub(crate) fn strip_json_comments(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_str = false;
+    let mut esc = false;
+    while let Some(c) = chars.next() {
+        if esc {
+            out.push(c);
+            esc = false;
+            continue;
+        }
+        if c == '\\' && in_str {
+            esc = true;
+            out.push(c);
+            continue;
+        }
+        if c == '"' {
+            in_str = !in_str;
+            out.push(c);
+            continue;
+        }
+        if !in_str && c == '/' {
+            if chars.peek() == Some(&'/') {
+                loop {
+                    match chars.next() {
+                        Some('\n') => {
+                            out.push('\n');
+                            break;
+                        }
+                        Some(_) => continue,
+                        None => break,
+                    }
+                }
+                continue;
+            } else if chars.peek() == Some(&'*') {
+                chars.next();
+                loop {
+                    match chars.next() {
+                        Some('*') if chars.peek() == Some(&'/') => {
+                            chars.next();
+                            break;
+                        }
+                        Some(_) => continue,
+                        None => break,
+                    }
+                }
+                continue;
+            }
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn is_claude_settings_file(path: &Path) -> bool {
+    path.file_name().and_then(|n| n.to_str()) == Some("settings.json")
+        && path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            == Some(".claude")
+}
+
+/// Returns paths of instruction conventions across target harnesses in `root`.
 pub(crate) fn detect_guidance_files(root: &Path) -> Vec<PathBuf> {
-    ["AGENTS.md", "CLAUDE.md"]
-        .iter()
-        .map(|name| root.join(name))
-        .filter(|p| p.is_file())
-        .collect()
+    let mut files = Vec::new();
+
+    for name in &["AGENTS.md", "CLAUDE.md"] {
+        let p = root.join(name);
+        if p.is_file() {
+            files.push(p);
+        }
+    }
+
+    if root.join("CLAUDE.md").is_file() || root.join(".claude").exists() {
+        files.push(root.join(".claude").join("settings.json"));
+    }
+
+    let agents_md = root.join(".agents").join("AGENTS.md");
+    if agents_md.is_file() || root.join(".agents").exists() {
+        files.push(agents_md);
+    }
+
+    let codex_md = root.join(".codex").join("instructions.md");
+    if codex_md.is_file() || root.join(".codex").exists() {
+        files.push(codex_md);
+    }
+
+    let opencode_md = root.join(".opencode").join("AGENTS.md");
+    if opencode_md.is_file() || root.join(".opencode").exists() {
+        files.push(opencode_md);
+    }
+
+    let kilo_md = root.join(".kilo").join("AGENTS.md");
+    if kilo_md.is_file() || root.join(".kilo").exists() {
+        files.push(kilo_md);
+    }
+
+    let cursor_rules = root.join(".cursor").join("rules");
+    if cursor_rules.is_dir() {
+        let mut found_mdc = false;
+        if let Ok(entries) = std::fs::read_dir(&cursor_rules) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file() && p.extension().and_then(|ext| ext.to_str()) == Some("mdc") {
+                    files.push(p);
+                    found_mdc = true;
+                }
+            }
+        }
+        if !found_mdc {
+            files.push(cursor_rules.join("mycelia.mdc"));
+        }
+    } else if root.join(".cursor").exists() {
+        files.push(cursor_rules.join("mycelia.mdc"));
+    }
+
+    files.sort();
+    files.dedup();
+    files
 }
 
-/// Returns the owned-block text that `insert_guidance_include` would write.
-pub(crate) fn guidance_include_preview() -> &'static str {
-    // Return a static string so callers can print it without allocation.
-    "<!-- BEGIN mycelia -->\nProject index: see `.mycelia/AGENTS.md` for orientation tools (find/retrieve before broad reads).\n<!-- END mycelia -->\n"
+/// Returns the guidance block text or JSON snippet that `insert_guidance_include` would write.
+pub(crate) fn guidance_include_preview(path: &Path) -> String {
+    if is_claude_settings_file(path) {
+        "{\n  \"enableAllProjectMcpServers\": true,\n  \"enabledMcpjsonServers\": [\n    \"mycelia\"\n  ]\n}\n".to_string()
+    } else {
+        guidance_block()
+    }
 }
 
-/// Inserts or updates the Mycelia owned block in `path`. Idempotent: when the
-/// block is already present it is replaced in place; otherwise it is appended.
+fn update_claude_project_settings(path: &Path) -> Result<(), String> {
+    let mut root: serde_json::Value = if path.is_file() {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+        let stripped = strip_json_comments(&text);
+        serde_json::from_str(&stripped)
+            .map_err(|e| format!("invalid JSON in {}: {e}", path.display()))?
+    } else {
+        serde_json::json!({})
+    };
+
+    let obj = root
+        .as_object_mut()
+        .ok_or_else(|| format!("unexpected root type in {}", path.display()))?;
+
+    obj.insert(
+        "enableAllProjectMcpServers".to_string(),
+        serde_json::Value::Bool(true),
+    );
+
+    let servers = obj
+        .entry("enabledMcpjsonServers")
+        .or_insert_with(|| serde_json::json!([]));
+    if let Some(arr) = servers.as_array_mut() {
+        let name_val = serde_json::Value::String("mycelia".to_string());
+        if !arr.contains(&name_val) {
+            arr.push(name_val);
+        }
+    } else {
+        return Err(format!(
+            "enabledMcpjsonServers is not an array in {}",
+            path.display()
+        ));
+    }
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
+    }
+    let json = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| format!("failed to write {}: {e}", path.display()))
+}
+
+/// Inserts or updates the Mycelia owned block or eager tool loading in `path`. Idempotent: when the
+/// block/setting is already present it is replaced/kept in place; otherwise it is appended/added.
 pub(crate) fn insert_guidance_include(path: &Path) -> Result<(), String> {
-    let existing = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    if is_claude_settings_file(path) {
+        return update_claude_project_settings(path);
+    }
+
+    let existing = if path.is_file() {
+        std::fs::read_to_string(path)
+            .map_err(|e| format!("failed to read {}: {e}", path.display()))?
+    } else {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
+        }
+        String::new()
+    };
 
     let block = guidance_block();
 
@@ -382,5 +554,47 @@ mod tests {
 
         let result = resolve_from_cwd(temp.path()).expect("found config");
         assert!(result.is_err(), "malformed config should return Err");
+    }
+
+    #[test]
+    fn detect_guidance_files_finds_harness_conventions() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join(".claude")).expect("create .claude");
+        fs::write(root.join(".claude/settings.json"), "{}").expect("write settings");
+        fs::create_dir_all(root.join(".agents")).expect("create .agents");
+        fs::write(root.join(".agents/AGENTS.md"), "# agents").expect("write agents");
+        fs::create_dir_all(root.join(".opencode")).expect("create .opencode");
+        fs::write(root.join(".opencode/AGENTS.md"), "# opencode").expect("write opencode");
+
+        let found = detect_guidance_files(root);
+        let paths: Vec<_> = found
+            .iter()
+            .map(|p| p.strip_prefix(root).unwrap())
+            .collect();
+        assert!(paths.contains(&Path::new(".claude/settings.json")));
+        assert!(paths.contains(&Path::new(".agents/AGENTS.md")));
+        assert!(paths.contains(&Path::new(".opencode/AGENTS.md")));
+    }
+
+    #[test]
+    fn insert_guidance_include_updates_claude_settings_idempotently() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join(".claude/settings.json");
+        fs::create_dir_all(path.parent().unwrap()).expect("create dir");
+        // Include comments to verify strip_json_comments works when reading existing settings.json
+        fs::write(&path, "{\n  // A comment\n  \"custom\": true\n}\n").expect("write initial");
+
+        insert_guidance_include(&path).expect("first insert");
+        let content = fs::read_to_string(&path).expect("read after first");
+        let val: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+        assert_eq!(val["enableAllProjectMcpServers"], true);
+        assert_eq!(val["custom"], true);
+        assert_eq!(val["enabledMcpjsonServers"].as_array().unwrap().len(), 1);
+
+        insert_guidance_include(&path).expect("second insert");
+        let content2 = fs::read_to_string(&path).expect("read after second");
+        let val2: serde_json::Value = serde_json::from_str(&content2).expect("valid json");
+        assert_eq!(val2["enabledMcpjsonServers"].as_array().unwrap().len(), 1);
     }
 }

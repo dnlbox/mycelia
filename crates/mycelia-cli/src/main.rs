@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 type Result<T> = std::result::Result<T, String>;
 
 const MISSING_EMBEDDINGS_HINT: &str = "corpus has no embeddings for this model; run `mycelia embed` first or pass `--strategy fts5-reranked`";
-const CONNECT_HARNESS_HELP: &str = "Supported harnesses:\n  codex            Codex CLI (~/.codex/config.toml)\n  claude-code      Claude Code CLI (`claude mcp add`)\n  claude-desktop   Claude Desktop app config\n  cursor           Cursor MCP config";
+const CONNECT_HARNESS_HELP: &str = "Supported harnesses:\n  codex            Codex CLI (~/.codex/config.toml)\n  claude-code      Claude Code CLI (`claude mcp add`)\n  claude-desktop   Claude Desktop app config\n  cursor           Cursor MCP config\n  antigravity      Antigravity / Gemini CLI (~/.gemini/antigravity/mcp_config.json)\n  opencode         OpenCode CLI (~/.config/opencode/opencode.json)\n  kilo             Kilo CLI (~/.config/kilo/kilo.json)";
 
 enum Retrieval {
     Embedded(Box<semantic::FastEmbedProvider>),
@@ -77,6 +77,10 @@ enum Harness {
     ClaudeCode,
     ClaudeDesktop,
     Cursor,
+    Antigravity,
+    #[value(name = "opencode")]
+    OpenCode,
+    Kilo,
 }
 
 impl Harness {
@@ -86,6 +90,9 @@ impl Harness {
             Self::ClaudeCode => "Claude Code",
             Self::ClaudeDesktop => "Claude Desktop",
             Self::Cursor => "Cursor",
+            Self::Antigravity => "Antigravity",
+            Self::OpenCode => "OpenCode",
+            Self::Kilo => "Kilo",
         }
     }
 }
@@ -652,7 +659,7 @@ fn cmd_init(path: Option<PathBuf>, no_embed: bool) -> Result<()> {
         eprintln!("Found {}", rel.display());
         eprintln!("Would add to {}:", rel.display());
         eprintln!("---");
-        eprint!("{}", project::guidance_include_preview());
+        eprint!("{}", project::guidance_include_preview(file));
         eprintln!("---");
         eprint!("Add guidance include? [y/N] ");
 
@@ -791,6 +798,27 @@ fn cmd_connect(harness: Option<Harness>, target: CwdTarget) -> Result<()> {
             harness.server_label(),
         ),
         Harness::Codex => connect_codex(server_name, &binary_str, &serve_args),
+        Harness::Antigravity => connect_json_file(
+            server_name,
+            &binary_str,
+            &serve_args,
+            antigravity_config_path()?,
+            harness.server_label(),
+        ),
+        Harness::OpenCode => connect_json_file(
+            server_name,
+            &binary_str,
+            &serve_args,
+            opencode_config_path()?,
+            harness.server_label(),
+        ),
+        Harness::Kilo => connect_json_file(
+            server_name,
+            &binary_str,
+            &serve_args,
+            kilo_config_path()?,
+            harness.server_label(),
+        ),
     }
 }
 
@@ -833,7 +861,8 @@ fn connect_json_file(
     let mut root: serde_json::Value = if config_path.is_file() {
         let text = fs::read_to_string(&config_path)
             .map_err(|e| format!("failed to read {}: {e}", config_path.display()))?;
-        serde_json::from_str(&text)
+        let stripped = project::strip_json_comments(&text);
+        serde_json::from_str(&stripped)
             .map_err(|e| format!("invalid JSON in {}: {e}", config_path.display()))?
     } else {
         serde_json::json!({})
@@ -889,6 +918,31 @@ fn cursor_config_path() -> Result<PathBuf> {
 fn codex_config_path() -> Result<PathBuf> {
     let home = home_dir()?;
     Ok(home.join(".codex/config.toml"))
+}
+
+fn antigravity_config_path() -> Result<PathBuf> {
+    let home = home_dir()?;
+    Ok(home.join(".gemini/antigravity/mcp_config.json"))
+}
+
+fn opencode_config_path() -> Result<PathBuf> {
+    let home = home_dir()?;
+    let jsonc = home.join(".config/opencode/opencode.jsonc");
+    if jsonc.exists() {
+        Ok(jsonc)
+    } else {
+        Ok(home.join(".config/opencode/opencode.json"))
+    }
+}
+
+fn kilo_config_path() -> Result<PathBuf> {
+    let home = home_dir()?;
+    let jsonc = home.join(".config/kilo/kilo.jsonc");
+    if jsonc.exists() {
+        Ok(jsonc)
+    } else {
+        Ok(home.join(".config/kilo/kilo.json"))
+    }
 }
 
 fn connect_codex(server_name: &str, binary: &str, args: &[&str]) -> Result<()> {

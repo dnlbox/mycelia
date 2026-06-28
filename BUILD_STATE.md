@@ -5,53 +5,21 @@ Agent working area. A fresh session reads this top to bottom, then follows
 
 ## Now
 
-- Latest shipped slice: concept `23`, typed graph edges, committed as
-  `8d70340 feat: add typed graph edges`. It added migration 005
-  (`chunks.symbol` + `edges`), conservative Rust depth-1 `calls` extraction,
-  CLI `graph`, MCP `find_related`, graph coverage in `status`, forced
-  `refresh` reindex, and schema upgrade on read.
-- Verified checkpoint: fmt, clippy, 116 tests, release build, release-binary
-  graph fixture smoke (including external/no-def names like `println` omitted),
-  real stdio MCP exchange, isolated `setup`/`status`/`graph`/`connect codex`,
-  self-indexed graph smoke, and fresh Forge refresh/eval. Current refreshed
-  Forge gate: routed 50/68 at weighted 1391.9 tokens/answer; fts5-reranked
-  48/68 at weighted 1395.9. No retrieval default change.
+- Latest shipped slice: Phase B / Slice B1, guidance plane across target harnesses.
+  Added convention detection across target harnesses (`AGENTS.md`, `CLAUDE.md`, `.claude/settings.json`, `.agents/AGENTS.md`, `.codex/instructions.md`, `.opencode/AGENTS.md`, `.kilo/AGENTS.md`, `.cursor/rules/*.mdc`). Implemented comment stripping for JSON/JSONC and eager tool loading updates (`enableAllProjectMcpServers`, `enabledMcpjsonServers`) in Claude settings. Extended `mycelia connect` to Antigravity, OpenCode, and Kilo. Verified: fmt/clippy clean, 134 tests passed, release build.
+- Verified checkpoint: fmt, clippy, 134 tests, release build, live `mycelia stats` dogfood verification showing 30.5x token savings.
 - V2 vision LOCKED and reconciled (2026-06-27): three planes (index, guidance,
   connection) divided by one consent boundary, the project boundary itself.
   Canonical spine is `docs/concept/v2/00_vision.md` with `consent-boundary.svg`.
-  Reconciliation banners plus the reworded non-goal landed in `v2/01`, `v2/03`
-  (new guidance-plane convention-detection subsection), `v2/README`, and
-  `concept/24`. No CLI behavior changed.
 - Execution plan written as `ROADMAP.md` (non-concept, repo root). Primary target
   is the interactive harness + MCP path (Mycelia + project + Codex, Claude Code,
   Antigravity, OpenCode, Kilo); headless CI is a kept secondary path and the clean
-  corroborating measurement, not the bet. Phase A foundation
-  (`.mycelia/config.toml` resolution + `mycelia init`) -> Phase B interactive path
-  (guidance plane across the target harnesses + a per-harness organic-use A/B that
-  is the publish-or-shelf gate) -> Phase C headless CI -> Phase D hardening ->
-  Phase E library API.
-- Latest shipped slice: Phase A / Slice A1, project config + cwd resolution.
-  New `project.rs` with `ProjectConfig` (serde toml_edit) + `resolve_from_cwd`
-  walk-up; resolution ladder in `CwdTarget`, `AnyTarget`, and MCP
-  `resolve_corpus` (project-local → registry → error naming `mycelia init`);
-  `log_path` on `ResolvedCorpus` in both `main.rs` and `mcp.rs`; `connect`
-  emits `mycelia serve` (no `--corpus`) for project-local; MCP `instructions`
-  lists project corpus first. Verified: temp repo with hand-written
-  `.mycelia/config.toml` resolves for status/find/serve with no registry entry;
-  legacy registry and explicit flags still work; 120 tests; release build;
-  project-local MCP exchange with correct corpus namespacing.
-- Latest shipped slice: Phase A / Slice A2, `mycelia init`. Creates
-  `.mycelia/` tree (config.toml, AGENTS.md fragment, .gitignore, db/logs/cache
-  dirs); indexes into `.mycelia/db/index.sqlite3` via existing pipeline;
-  consent-gated one-line owned block into any root AGENTS.md or CLAUDE.md
-  (idempotent replace-in-place, never duplicates). Verified: tree created,
-  config.toml not overwritten on re-run, guidance block applied/updated on y /
-  skipped on n; `mycelia status` from project cwd resolves via config.toml
-  alone; 131 tests; fmt/clippy clean; release build.
-- Next implementation slice: Phase B / Slice B1, guidance plane. Per harness
-  (Codex, Claude Code), detect and wire a consent-gated, idempotent, removable
-  owned block into the harness instruction convention. For Claude Code, also
-  write a project `.claude/settings.json` eager tool-load entry.
+  corroborating measurement, not the bet.
+- Active slice: Phase B / Slice B2, Interactive Measurement.
+  Intent: Run standard exploratory coding scenarios across primary target harnesses with Mycelia wired vs. a baseline grep/read setup. Measure token consumption, number of files opened, and time to correct identification.
+  Verification plan:
+  1. Record before/after token metrics and latency for sample exploration tasks.
+  2. Document findings in project evaluation logs or docs.
 - Blockers: none.
 
 ## Decisions
@@ -115,6 +83,7 @@ Agent working area. A fresh session reads this top to bottom, then follows
   `project.rs`; resolution ladder across `main.rs` and `mcp.rs`; 120 tests.
 - 2026-06-28: Phase A / Slice A2 — `mycelia init` shipped. Tree creation,
   `--no-embed`, consent-gated guidance include, idempotent; 131 tests.
+- 2026-06-28: Phase B / Slice B1 — guidance plane across target harnesses shipped. Convention detection across AGENTS.md, CLAUDE.md, .claude/settings.json, .agents/AGENTS.md, .codex/instructions.md, .opencode/AGENTS.md, .kilo/AGENTS.md, .cursor/rules/*.mdc. Added JSON comment stripping and eager tool loading update for Claude settings. Extended connect to Antigravity, OpenCode, and Kilo; 134 tests.
 
 ## Archive
 
