@@ -1,6 +1,7 @@
 mod log;
 mod mcp;
 mod profile;
+mod project;
 mod semantic;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -256,6 +257,9 @@ struct ResolvedCorpus {
     database: PathBuf,
     corpus_name: Option<String>,
     corpus_root: Option<PathBuf>,
+    log_path: Option<PathBuf>,
+    /// True when resolved from `.mycelia/config.toml` rather than the registry.
+    project_local: bool,
 }
 
 struct ResolvedServe {
@@ -268,27 +272,23 @@ impl CwdTarget {
         match (self.corpus, self.database) {
             (Some(name), None) => {
                 let p = profile::get(&name)?;
+                let log_path = profile::log_path_for(&p.name).ok();
                 Ok(ResolvedCorpus {
                     database: p.database,
                     corpus_name: Some(p.name),
                     corpus_root: Some(p.root),
+                    log_path,
+                    project_local: false,
                 })
             }
             (None, Some(db)) => Ok(ResolvedCorpus {
                 database: db,
                 corpus_name: None,
                 corpus_root: None,
+                log_path: None,
+                project_local: false,
             }),
-            (None, None) => {
-                let cwd = std::env::current_dir()
-                    .map_err(|error| format!("cannot determine current directory: {error}"))?;
-                let p = profile::infer_from_cwd(&cwd)?;
-                Ok(ResolvedCorpus {
-                    database: p.database,
-                    corpus_name: Some(p.name),
-                    corpus_root: Some(p.root),
-                })
-            }
+            (None, None) => resolve_from_cwd(),
             (Some(_), Some(_)) => {
                 Err("--corpus and --database cannot be used together".to_string())
             }
@@ -301,27 +301,23 @@ impl AnyTarget {
         match (self.corpus, self.database) {
             (Some(name), None) => {
                 let p = profile::get(&name)?;
+                let log_path = profile::log_path_for(&p.name).ok();
                 Ok(ResolvedCorpus {
                     database: p.database,
                     corpus_name: Some(p.name),
                     corpus_root: Some(p.root),
+                    log_path,
+                    project_local: false,
                 })
             }
             (None, Some(db)) => Ok(ResolvedCorpus {
                 database: db,
                 corpus_name: None,
                 corpus_root: None,
+                log_path: None,
+                project_local: false,
             }),
-            (None, None) => {
-                let cwd = std::env::current_dir()
-                    .map_err(|error| format!("cannot determine current directory: {error}"))?;
-                let p = profile::infer_from_cwd(&cwd)?;
-                Ok(ResolvedCorpus {
-                    database: p.database,
-                    corpus_name: Some(p.name),
-                    corpus_root: Some(p.root),
-                })
-            }
+            (None, None) => resolve_from_cwd(),
             (Some(_), Some(_)) => {
                 Err("--corpus and --database cannot be used together".to_string())
             }
@@ -373,6 +369,42 @@ impl IndexTarget {
             ),
         }
     }
+}
+
+/// Resolution ladder for cwd-inferred targets (no explicit `--corpus` or
+/// `--database`): `.mycelia/config.toml` walk-up first, then the legacy
+/// registry, then a clear error naming `mycelia init`.
+fn resolve_from_cwd() -> Result<ResolvedCorpus> {
+    let cwd = std::env::current_dir()
+        .map_err(|error| format!("cannot determine current directory: {error}"))?;
+
+    if let Some(result) = project::resolve_from_cwd(&cwd) {
+        let r = result?;
+        return Ok(ResolvedCorpus {
+            database: r.database,
+            corpus_name: Some(r.name),
+            corpus_root: Some(r.root),
+            log_path: Some(r.log_path),
+            project_local: true,
+        });
+    }
+
+    if let Ok(p) = profile::infer_from_cwd(&cwd) {
+        let log_path = profile::log_path_for(&p.name).ok();
+        return Ok(ResolvedCorpus {
+            database: p.database,
+            corpus_name: Some(p.name),
+            corpus_root: Some(p.root),
+            log_path,
+            project_local: false,
+        });
+    }
+
+    Err(
+        "no Mycelia project found; run `mycelia init` to set up project-local indexing, \
+         or `mycelia setup` to register a corpus"
+            .to_string(),
+    )
 }
 
 // Main dispatch
@@ -623,10 +655,12 @@ fn cmd_connect(harness: Option<Harness>, target: CwdTarget) -> Result<()> {
         format!("connect requires a harness.\n\n{CONNECT_HARNESS_HELP}\n\nUsage: mycelia connect <harness>")
     })?;
     let resolved = target.resolve()?;
-    let corpus_name = resolved.corpus_name.ok_or_else(|| {
-        "connect requires a named corpus; use --corpus or run from a registered directory"
-            .to_string()
-    })?;
+    if resolved.corpus_name.is_none() {
+        return Err(
+            "connect requires a named corpus; use --corpus or run from a registered directory"
+                .to_string(),
+        );
+    }
 
     let binary =
         std::env::current_exe().map_err(|e| format!("failed to determine binary path: {e}"))?;
@@ -636,25 +670,32 @@ fn cmd_connect(harness: Option<Harness>, target: CwdTarget) -> Result<()> {
         .to_owned();
 
     let server_name = "mycelia";
-    let args = ["serve", "--corpus", &corpus_name];
+    // For project-local corpora the server self-discovers via cwd; for registry
+    // corpora pin the name so the server resolves the right database.
+    let corpus_name = resolved.corpus_name.as_deref().unwrap_or("");
+    let serve_args: Vec<&str> = if resolved.project_local {
+        vec!["serve"]
+    } else {
+        vec!["serve", "--corpus", corpus_name]
+    };
 
     match harness {
-        Harness::ClaudeCode => connect_claude_code(server_name, &binary_str, &args),
+        Harness::ClaudeCode => connect_claude_code(server_name, &binary_str, &serve_args),
         Harness::ClaudeDesktop => connect_json_file(
             server_name,
             &binary_str,
-            &args,
+            &serve_args,
             claude_desktop_config_path()?,
             harness.server_label(),
         ),
         Harness::Cursor => connect_json_file(
             server_name,
             &binary_str,
-            &args,
+            &serve_args,
             cursor_config_path()?,
             harness.server_label(),
         ),
-        Harness::Codex => connect_codex(server_name, &binary_str, &args),
+        Harness::Codex => connect_codex(server_name, &binary_str, &serve_args),
     }
 }
 
@@ -814,10 +855,7 @@ fn home_dir() -> Result<PathBuf> {
 fn cmd_stats(target: CwdTarget, recent: usize) -> Result<()> {
     let resolved = target.resolve()?;
     let corpus_name = resolved.corpus_name.as_deref().unwrap_or("<unnamed>");
-    let log_path = resolved
-        .corpus_name
-        .as_deref()
-        .and_then(|name| profile::log_path_for(name).ok());
+    let log_path = resolved.log_path.clone();
 
     let stats = log_path.as_deref().map(log::read_stats).unwrap_or_default();
 
@@ -876,10 +914,7 @@ fn cmd_status(target: CwdTarget) -> Result<()> {
 
     let db_stats = mycelia_core::corpus_status(&resolved.database).map_err(|e| e.to_string())?;
 
-    let log_path = resolved
-        .corpus_name
-        .as_deref()
-        .and_then(|name| profile::log_path_for(name).ok());
+    let log_path = resolved.log_path.clone();
 
     let last_serve = log_path
         .as_deref()
@@ -966,10 +1001,12 @@ fn cmd_list() -> Result<()> {
     }
 
     let cwd = std::env::current_dir().ok();
-    let inferred_name = cwd
-        .as_deref()
-        .and_then(|cwd| profile::infer_from_cwd(cwd).ok())
-        .map(|p| p.name);
+    let inferred_name = cwd.as_deref().and_then(|cwd| {
+        if let Some(Ok(r)) = project::resolve_from_cwd(cwd) {
+            return Some(r.name);
+        }
+        profile::infer_from_cwd(cwd).ok().map(|p| p.name)
+    });
 
     println!("   {:<20} root", "name");
     for profile in &all {

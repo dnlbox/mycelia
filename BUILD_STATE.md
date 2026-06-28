@@ -30,14 +30,22 @@ Agent working area. A fresh session reads this top to bottom, then follows
   (guidance plane across the target harnesses + a per-harness organic-use A/B that
   is the publish-or-shelf gate) -> Phase C headless CI -> Phase D hardening ->
   Phase E library API.
-- Next implementation slice: Phase A / Slice A1, project config + cwd resolution
-  preferring `.mycelia/config.toml` with the legacy registry as fallback.
-  Grounded: today resolution is user-level via `infer_from_cwd`
-  (`crates/mycelia-cli/src/profile.rs`) against `~/.config` profiles; A1 adds a
-  new `crates/mycelia-cli/src/project.rs`. The AGENTS.md Project Specifics V2
-  section is reconciled during A1 via the sync-protocols closeout gate.
-- Pending: Daniel reviews `00_vision.md` and `ROADMAP.md` before code starts. The
-  real decision point is Phase B's gate (publish v2 or shelf the project).
+- Latest shipped slice: Phase A / Slice A1, project config + cwd resolution.
+  New `project.rs` with `ProjectConfig` (serde toml_edit) + `resolve_from_cwd`
+  walk-up; resolution ladder in `CwdTarget`, `AnyTarget`, and MCP
+  `resolve_corpus` (project-local → registry → error naming `mycelia init`);
+  `log_path` on `ResolvedCorpus` in both `main.rs` and `mcp.rs`; `connect`
+  emits `mycelia serve` (no `--corpus`) for project-local; MCP `instructions`
+  lists project corpus first. Verified: temp repo with hand-written
+  `.mycelia/config.toml` resolves for status/find/serve with no registry entry;
+  legacy registry and explicit flags still work; 120 tests; release build;
+  project-local MCP exchange with correct corpus namespacing.
+- Next implementation slice: Phase A / Slice A2, `mycelia init`. Creates
+  `.mycelia/config.toml`, `.mycelia/AGENTS.md`, `db/ logs/ cache/`
+  directories, and `.mycelia/.gitignore`; indexes and embeds into
+  `.mycelia/db/index.sqlite3`; optionally previews + applies a one-line include
+  into a root `AGENTS.md` or `CLAUDE.md`. Idempotent. No writes outside
+  `.mycelia/` without confirmation.
 - Blockers: none.
 
 ## Decisions
@@ -97,6 +105,8 @@ Agent working area. A fresh session reads this top to bottom, then follows
   spine (new `00_vision.md` + `consent-boundary.svg`; banners and fixes in
   `01`/`03`/`24`/`README`) and wrote `ROADMAP.md` sequencing foundation ->
   provable wedge -> hardening -> library with an explicit publish-or-shelf gate.
+- 2026-06-28: Phase A / Slice A1 — project config resolution shipped. New
+  `project.rs`; resolution ladder across `main.rs` and `mcp.rs`; 120 tests.
 
 ## Archive
 

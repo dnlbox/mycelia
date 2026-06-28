@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::log::CorpusLogger;
 use crate::profile::{self, CorpusProfile};
+use crate::project;
 use crate::semantic::{FastEmbedProvider, MODEL_ID};
 
 type McpToolResult<T> = std::result::Result<T, String>;
@@ -85,6 +86,7 @@ struct ResolvedCorpus {
     name: Option<String>,
     root: Option<PathBuf>,
     database: PathBuf,
+    log_path: Option<PathBuf>,
 }
 
 enum ResolveFailure {
@@ -133,6 +135,7 @@ impl MyceliaServer {
                     name: None,
                     root: None,
                     database: database.clone(),
+                    log_path: None,
                 })
             }
             ServerTarget::Registry {
@@ -150,6 +153,18 @@ impl MyceliaServer {
                     };
                 }
 
+                // Project-local config takes precedence over the registry.
+                if let Some(result) = project::resolve_from_cwd(launch_cwd) {
+                    return result
+                        .map(|r| ResolvedCorpus {
+                            name: Some(r.name),
+                            root: Some(r.root),
+                            database: r.database,
+                            log_path: Some(r.log_path),
+                        })
+                        .map_err(ResolveFailure::Message);
+                }
+
                 if let Ok(profile) = profile::infer_from_cwd(launch_cwd) {
                     return Ok(resolved_profile(profile));
                 }
@@ -162,7 +177,9 @@ impl MyceliaServer {
 
                 match available.len() {
                     0 => Err(ResolveFailure::NeedsCorpus {
-                        message: "no corpora registered; run `mycelia setup` first".to_owned(),
+                        message:
+                            "no corpora registered; run `mycelia init` or `mycelia setup` first"
+                                .to_owned(),
                         available,
                     }),
                     1 => Ok(resolved_profile(
@@ -263,23 +280,33 @@ impl MyceliaServer {
     }
 
     fn logger_for(&self, resolved: &ResolvedCorpus) -> Option<CorpusLogger> {
-        let name = resolved.name.as_deref()?;
-        profile::log_path_for(name)
-            .ok()
+        resolved
+            .log_path
+            .clone()
             .map(|path| CorpusLogger::open(path, resolved.root.clone()))
     }
 
     fn instructions(&self) -> String {
-        let available = profile::list().unwrap_or_default();
-        if available.is_empty() {
+        // Collect corpus names: project-local first (if any), then registry,
+        // skipping duplicates so a corpus registered in both is listed once.
+        let mut names: Vec<String> = Vec::new();
+        if let ServerTarget::Registry { launch_cwd, .. } = &self.target
+            && let Some(Ok(r)) = project::resolve_from_cwd(launch_cwd)
+        {
+            names.push(r.name);
+        }
+        for p in profile::list().unwrap_or_default() {
+            if !names.contains(&p.name) {
+                names.push(p.name);
+            }
+        }
+        if names.is_empty() {
             return SERVER_INSTRUCTIONS.to_owned();
         }
-        let names = available
-            .iter()
-            .map(|profile| profile.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("{SERVER_INSTRUCTIONS} Available corpora: {names}.")
+        format!(
+            "{SERVER_INSTRUCTIONS} Available corpora: {}.",
+            names.join(", ")
+        )
     }
 }
 
@@ -386,7 +413,11 @@ impl MyceliaServer {
         let all = profile::list().map_err(|error| error.to_string())?;
         let default_name = match &self.target {
             ServerTarget::Registry { launch_cwd, .. } => {
-                profile::infer_from_cwd(launch_cwd).ok().map(|p| p.name)
+                if let Some(Ok(r)) = project::resolve_from_cwd(launch_cwd) {
+                    Some(r.name)
+                } else {
+                    profile::infer_from_cwd(launch_cwd).ok().map(|p| p.name)
+                }
             }
             ServerTarget::Database { .. } => None,
         };
@@ -441,13 +472,22 @@ pub(crate) fn serve(
     } else {
         "lexical"
     };
-    if matches!(&target, ServerTarget::Registry { .. })
-        && let Ok(corpora) = profile::list()
-    {
-        for corpus in corpora {
-            if let Ok(path) = profile::log_path_for(&corpus.name) {
-                CorpusLogger::open(path, Some(corpus.root))
-                    .log_serve_start(MODEL_ID, embeddings_status);
+    if let ServerTarget::Registry { launch_cwd, .. } = &target {
+        // Log serve-start to the project-local log if a .mycelia/config.toml is
+        // present; fall through to registry corpora regardless.
+        if let Some(Ok(r)) = project::resolve_from_cwd(launch_cwd) {
+            if let Some(parent) = r.log_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            CorpusLogger::open(r.log_path, Some(r.root))
+                .log_serve_start(MODEL_ID, embeddings_status);
+        }
+        if let Ok(corpora) = profile::list() {
+            for corpus in corpora {
+                if let Ok(path) = profile::log_path_for(&corpus.name) {
+                    CorpusLogger::open(path, Some(corpus.root))
+                        .log_serve_start(MODEL_ID, embeddings_status);
+                }
             }
         }
     }
@@ -484,10 +524,12 @@ fn drifted_source(outcome: &Retrieved) -> Option<&str> {
 }
 
 fn resolved_profile(profile: CorpusProfile) -> ResolvedCorpus {
+    let log_path = profile::log_path_for(&profile.name).ok();
     ResolvedCorpus {
         name: Some(profile.name),
         root: Some(profile.root),
         database: profile.database,
+        log_path,
     }
 }
 
@@ -583,7 +625,11 @@ fn resolve_failure_json(server: &MyceliaServer, error: ResolveFailure) -> McpToo
         ResolveFailure::NeedsCorpus { message, available } => {
             let default_name = match &server.target {
                 ServerTarget::Registry { launch_cwd, .. } => {
-                    profile::infer_from_cwd(launch_cwd).ok().map(|p| p.name)
+                    if let Some(Ok(r)) = project::resolve_from_cwd(launch_cwd) {
+                        Some(r.name)
+                    } else {
+                        profile::infer_from_cwd(launch_cwd).ok().map(|p| p.name)
+                    }
                 }
                 ServerTarget::Database { .. } => None,
             };
