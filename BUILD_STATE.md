@@ -17,9 +17,16 @@ Agent working area. A fresh session reads this top to bottom, then follows
   corroborating measurement, not the bet.
 - Active slice: Phase B / Slice B2, Interactive Measurement.
   Intent: Run standard exploratory coding scenarios across primary target harnesses with Mycelia wired vs. a baseline grep/read setup. Measure token consumption, number of files opened, and time to correct identification.
+  Current artifact: `docs/evaluations/phase_b2_interactive_measurement.md`
+  defines the paired-run protocol, task set, metrics, decision rule, and the
+  initial Codex kickoff observation. Full publish-or-shelf decision is still
+  pending controlled paired runs, starting with Codex and Claude Code.
   Verification plan:
   1. Record before/after token metrics and latency for sample exploration tasks.
   2. Document findings in project evaluation logs or docs.
+  3. Before controlled runs, refresh the `mycelia` corpus because the kickoff
+     dogfood query did not surface `ROADMAP.md` and `status` reported incomplete
+     embeddings.
 - Blockers: none.
 
 ## Decisions
@@ -84,6 +91,7 @@ Agent working area. A fresh session reads this top to bottom, then follows
 - 2026-06-28: Phase A / Slice A2 — `mycelia init` shipped. Tree creation,
   `--no-embed`, consent-gated guidance include, idempotent; 131 tests.
 - 2026-06-28: Phase B / Slice B1 — guidance plane across target harnesses shipped. Convention detection across AGENTS.md, CLAUDE.md, .claude/settings.json, .agents/AGENTS.md, .codex/instructions.md, .opencode/AGENTS.md, .kilo/AGENTS.md, .cursor/rules/*.mdc. Added JSON comment stripping and eager tool loading update for Claude settings. Extended connect to Antigravity, OpenCode, and Kilo; 134 tests.
+- 2026-06-28: Phase B / Slice B2 measurement protocol started in `docs/evaluations/phase_b2_interactive_measurement.md`; recorded initial Codex observation, kept the publish-or-shelf decision pending paired harness runs, and noted the named `mycelia` corpus needs refresh before controlled measurement.
 
 ## Archive
 
