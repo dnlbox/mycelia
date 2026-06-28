@@ -696,7 +696,7 @@ fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
         .as_str()
         .expect("server instructions");
     assert!(
-        instructions.contains("token-efficient orientation path"),
+        instructions.contains("token-efficient way to read this project"),
         "instructions should explain why to use Mycelia first:\n{instructions}"
     );
 
@@ -926,6 +926,208 @@ fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
         .read_to_string(&mut needs_stderr)
         .expect("read MCP stderr");
     assert!(needs_status.success(), "MCP server failed:\n{needs_stderr}");
+}
+
+#[test]
+fn stdio_mcp_retrieves_namespaced_chunk_id_in_project_local_mode() {
+    // Regression: `find` namespaces chunk ids with the project name even in
+    // project-local (`init` + `--project-root`) mode, where the registry is
+    // empty. `retrieve` must accept that namespaced id back instead of failing
+    // with `needs_corpus` (which forced the model to strip the namespace by hand).
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path().join("candelabrum");
+    let config_home = temp.path().join("config");
+    let data_home = temp.path().join("data");
+    fs::create_dir_all(&root).expect("create project root");
+    write_file(&root.join("notes.txt"), "a precise sourced result");
+
+    // Project-local init indexes into <root>/.mycelia and registers nothing in
+    // the global registry, so the registry stays empty.
+    run_success_with_homes(
+        &["init", root.to_str().expect("root path"), "--no-embed"],
+        &config_home,
+        &data_home,
+    );
+
+    let mut child = Command::new(bin_path())
+        .args([
+            "serve",
+            "--project-root",
+            root.to_str().expect("root path"),
+            "--lexical",
+        ])
+        .env("MYCELIA_CONFIG_HOME", &config_home)
+        .env("MYCELIA_DATA_HOME", &data_home)
+        .current_dir(temp.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start MCP server");
+    let mut stdin = child.stdin.take().expect("MCP stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("MCP stdout"));
+
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "mycelia-test", "version": "0.1.0" }
+            }
+        }),
+    );
+    read_json_line(&mut stdout);
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+    );
+
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": { "name": "find", "arguments": { "query": "precise", "limit": 5 } }
+        }),
+    );
+    let find_result = read_json_line(&mut stdout);
+    let find_text = find_result["result"]["content"][0]["text"]
+        .as_str()
+        .expect("find text content");
+    let headers: Value = serde_json::from_str(find_text).expect("find headers json");
+    let chunk_id = headers[0]["chunk_id"]
+        .as_str()
+        .expect("chunk id")
+        .to_owned();
+    assert!(
+        chunk_id.starts_with("candelabrum:"),
+        "find must namespace the chunk id with the project name, got: {chunk_id}"
+    );
+
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": { "name": "retrieve", "arguments": { "chunk_id": chunk_id } }
+        }),
+    );
+    let retrieved = read_json_line(&mut stdout);
+    let retrieved_text = retrieved["result"]["content"][0]["text"]
+        .as_str()
+        .expect("retrieve text content");
+    assert!(
+        retrieved_text.contains("\"status\":\"ok\""),
+        "retrieve must accept the namespaced id in project-local mode, got: {retrieved_text}"
+    );
+    assert!(
+        !retrieved_text.contains("needs_corpus"),
+        "retrieve must not reject its own namespaced id: {retrieved_text}"
+    );
+
+    drop(stdin);
+    child.wait().expect("wait for MCP server");
+}
+
+#[test]
+fn stdio_mcp_logs_full_audit_including_failures_and_list_corpora() {
+    // The corpus log must be a true audit: every tool call, including
+    // `list_corpora` and FAILED calls, not only successful find/retrieve.
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path().join("candelabrum");
+    let config_home = temp.path().join("config");
+    let data_home = temp.path().join("data");
+    fs::create_dir_all(&root).expect("create project root");
+    write_file(&root.join("notes.txt"), "a precise sourced result");
+    run_success_with_homes(
+        &["init", root.to_str().expect("root path"), "--no-embed"],
+        &config_home,
+        &data_home,
+    );
+
+    let mut child = Command::new(bin_path())
+        .args([
+            "serve",
+            "--project-root",
+            root.to_str().expect("root path"),
+            "--lexical",
+        ])
+        .env("MYCELIA_CONFIG_HOME", &config_home)
+        .env("MYCELIA_DATA_HOME", &data_home)
+        .current_dir(temp.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start MCP server");
+    let mut stdin = child.stdin.take().expect("MCP stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("MCP stdout"));
+
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "mycelia-test", "version": "0.1.0" }
+            }
+        }),
+    );
+    read_json_line(&mut stdout);
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+    );
+
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": { "name": "list_corpora", "arguments": {} }
+        }),
+    );
+    read_json_line(&mut stdout);
+
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": { "name": "retrieve", "arguments": { "chunk_id": "deadbeefdeadbeef" } }
+        }),
+    );
+    read_json_line(&mut stdout);
+
+    drop(stdin);
+    child.wait().expect("wait for MCP server");
+
+    let logs_dir = root.join(".mycelia").join("logs");
+    let log_file = fs::read_dir(&logs_dir)
+        .expect("logs dir")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .find(|path| path.extension().is_some_and(|ext| ext == "log"))
+        .expect("a .log file");
+    let log = fs::read_to_string(&log_file).expect("read audit log");
+    assert!(
+        log.contains("list_corpora"),
+        "audit must record list_corpora:\n{log}"
+    );
+    assert!(
+        log.contains("retrieve") && log.contains("status=error"),
+        "audit must record the failed retrieve:\n{log}"
+    );
 }
 
 #[test]

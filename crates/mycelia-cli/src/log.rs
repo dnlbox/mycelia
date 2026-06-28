@@ -77,6 +77,27 @@ impl CorpusLogger {
         ));
     }
 
+    pub(crate) fn log_find_related(&self, symbol: &str, direction: &str, results: usize) {
+        self.write_line(format!(
+            "{}  find_related symbol={symbol:?}  direction={direction}  results={results}",
+            now(),
+        ));
+    }
+
+    pub(crate) fn log_list_corpora(&self, count: usize) {
+        self.write_line(format!("{}  list_corpora count={count}", now()));
+    }
+
+    /// Records a failed tool call so the log is a true audit of every invocation,
+    /// not only the ones that succeeded. `detail` is the call's identifying
+    /// argument (for example `q="..."` or `chunk=...`).
+    pub(crate) fn log_error(&self, tool: &str, detail: &str, message: &str) {
+        self.write_line(format!(
+            "{}  {tool:<12} {detail}  status=error  msg={message:?}",
+            now(),
+        ));
+    }
+
     fn write_line(&self, line: String) {
         let Ok(mut guard) = self.inner.lock() else {
             return;
@@ -117,7 +138,11 @@ pub(crate) fn recent_events(log_path: &Path, limit: usize) -> Vec<String> {
     };
     let mut events = Vec::new();
     for line in BufReader::new(file).lines().map_while(Result::ok) {
-        if line.contains("  find ") || line.contains("  retrieve ") {
+        if line.contains("  find ")
+            || line.contains("  retrieve ")
+            || line.contains("  find_related ")
+            || line.contains("  list_corpora ")
+        {
             events.push(line);
             if events.len() > limit {
                 events.remove(0);
@@ -134,8 +159,9 @@ pub(crate) fn read_stats(log_path: &Path) -> StatsReport {
         return report;
     };
     for line in BufReader::new(file).lines().map_while(Result::ok) {
-        // Log lines with a `find` event carry the token estimates.
-        if !line.contains("  find ") {
+        // Successful `find` events carry the token estimates; skip failed calls
+        // so the audit's error lines never distort the savings aggregate.
+        if !line.contains("  find ") || line.contains("status=error") {
             continue;
         }
         report.queries += 1;

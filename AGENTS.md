@@ -361,3 +361,7 @@ Run these gates in order:
 - Add dependencies only when they remove meaningful implementation risk.
 
 <!-- END PROJECT SPECIFICS -->
+
+<!-- BEGIN mycelia -->
+Project index: see `.mycelia/AGENTS.md` for orientation tools (find/retrieve before broad reads).
+<!-- END mycelia -->

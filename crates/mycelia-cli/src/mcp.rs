@@ -61,7 +61,7 @@ struct FindRelatedRequest {
     corpus: Option<String>,
 }
 
-const SERVER_INSTRUCTIONS: &str = "Mycelia is the token-efficient orientation path for the current project corpus. For questions like where something is implemented, what supports a feature or language, which files touch an area, or which symbol defines behavior, call find first. Pass corpus only when the user explicitly names another project. Use retrieve only for the selected chunk ids that look relevant. Shell grep/read remain useful follow-up tools for exact line edits after Mycelia has narrowed the search.";
+const SERVER_INSTRUCTIONS: &str = "Mycelia is the token-efficient way to read this project, and it is a loop, not a one-time step. Throughout a task, whenever you need to locate or read code (where something is implemented, what supports a feature, which symbol defines behavior, or what a function or file actually contains), call find to locate the chunks, then call retrieve on the ids you want to read. retrieve returns the verified current source and is the preferred way to read located code; prefer it over opening a file by hand, since a hand-picked path or line range can be stale. Pass corpus only when the user explicitly names another project. Use shell grep and read for editing, exact-string or single-line lookups, generated files, and when Mycelia missed, not as the default way to read code you just found.";
 
 #[derive(Clone)]
 struct MyceliaServer {
@@ -95,6 +95,16 @@ enum ResolveFailure {
         message: String,
         available: Vec<CorpusProfile>,
     },
+}
+
+impl ResolveFailure {
+    fn summary(&self) -> &str {
+        match self {
+            ResolveFailure::Message(message) | ResolveFailure::NeedsCorpus { message, .. } => {
+                message
+            }
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -144,13 +154,29 @@ impl MyceliaServer {
             } => {
                 let available = profile::list().map_err(ResolveFailure::Message)?;
                 if let Some(name) = corpus {
-                    return match available.into_iter().find(|profile| profile.name == name) {
-                        Some(profile) => Ok(resolved_profile(profile)),
-                        None => Err(ResolveFailure::NeedsCorpus {
-                            message: format!("unknown corpus {name:?}; choose an available corpus"),
-                            available: profile::list().map_err(ResolveFailure::Message)?,
-                        }),
-                    };
+                    if let Some(profile) = available.into_iter().find(|profile| profile.name == name)
+                    {
+                        return Ok(resolved_profile(profile));
+                    }
+                    // A project-local corpus (created by `init`) is not in the
+                    // registry, yet `find` still namespaces its chunk ids with the
+                    // project name. Accept that name here so a namespaced chunk id
+                    // round-trips back through `retrieve` in project-local mode
+                    // instead of failing with `needs_corpus`.
+                    if let Some(Ok(local)) = project::resolve_from_cwd(launch_cwd)
+                        && local.name == name
+                    {
+                        return Ok(ResolvedCorpus {
+                            name: Some(local.name),
+                            root: Some(local.root),
+                            database: local.database,
+                            log_path: Some(local.log_path),
+                        });
+                    }
+                    return Err(ResolveFailure::NeedsCorpus {
+                        message: format!("unknown corpus {name:?}; choose an available corpus"),
+                        available: profile::list().map_err(ResolveFailure::Message)?,
+                    });
                 }
 
                 // Project-local config takes precedence over the registry.
@@ -248,11 +274,25 @@ impl MyceliaServer {
     }
 
     fn search_json(&self, request: &FindRequest) -> McpToolResult<String> {
+        let detail = format!("q={:?}", request.query);
         let resolved = match self.resolve_corpus(request.corpus.as_deref()) {
             Ok(resolved) => resolved,
-            Err(error) => return resolve_failure_json(self, error),
+            Err(error) => {
+                if let Some(logger) = self.ambient_logger() {
+                    logger.log_error("find", &detail, error.summary());
+                }
+                return resolve_failure_json(self, error);
+            }
         };
-        let headers = self.find_headers(&resolved, &request.query, request.limit)?;
+        let headers = match self.find_headers(&resolved, &request.query, request.limit) {
+            Ok(headers) => headers,
+            Err(error) => {
+                if let Some(logger) = self.logger_for(&resolved) {
+                    logger.log_error("find", &detail, &error);
+                }
+                return Err(error);
+            }
+        };
 
         // Validate the sources behind the returned headers against disk. If any
         // drifted, self-heal them and re-rank once so the headers stay precise.
@@ -284,6 +324,15 @@ impl MyceliaServer {
             .log_path
             .clone()
             .map(|path| CorpusLogger::open(path, resolved.root.clone()))
+    }
+
+    /// Best-effort logger for audit entries that have no per-call corpus of their
+    /// own (a failed resolution, or `list_corpora`): falls back to the default
+    /// project-local corpus so the audit still records the attempt.
+    fn ambient_logger(&self) -> Option<CorpusLogger> {
+        self.resolve_corpus(None)
+            .ok()
+            .and_then(|resolved| self.logger_for(&resolved))
     }
 
     fn instructions(&self) -> String {
@@ -343,15 +392,31 @@ impl MyceliaServer {
         description = "Fetch the exact body for one namespaced chunk id selected from a prior Mycelia search result. Use after find/search_codebase/locate_implementation has identified the specific source chunk worth reading."
     )]
     fn retrieve(&self, Parameters(request): Parameters<RetrieveRequest>) -> McpToolResult<String> {
+        let detail = format!("chunk={}", request.chunk_id);
         let (corpus_name, raw_chunk_id) = split_namespaced_chunk_id(&request.chunk_id);
         let resolved = match self.resolve_corpus(corpus_name) {
             Ok(resolved) => resolved,
-            Err(error) => return resolve_failure_json(self, error),
+            Err(error) => {
+                if let Some(logger) = self.ambient_logger() {
+                    logger.log_error("retrieve", &detail, error.summary());
+                }
+                return resolve_failure_json(self, error);
+            }
         };
 
-        let outcome = mycelia_core::retrieve(&resolved.database, raw_chunk_id)
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| format!("chunk not found: {}", request.chunk_id))?;
+        let outcome = match mycelia_core::retrieve(&resolved.database, raw_chunk_id)
+            .map_err(|error| error.to_string())
+            .and_then(|found| {
+                found.ok_or_else(|| format!("chunk not found: {}", request.chunk_id))
+            }) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                if let Some(logger) = self.logger_for(&resolved) {
+                    logger.log_error("retrieve", &detail, &error);
+                }
+                return Err(error);
+            }
+        };
 
         if let Some(logger) = self.logger_for(&resolved) {
             let source_path = match &outcome {
@@ -396,12 +461,34 @@ impl MyceliaServer {
         Parameters(request): Parameters<FindRelatedRequest>,
     ) -> McpToolResult<String> {
         let direction = parse_direction(request.direction.as_deref())?;
+        let detail = format!("symbol={:?}", request.symbol);
         let resolved = match self.resolve_corpus(request.corpus.as_deref()) {
             Ok(resolved) => resolved,
-            Err(error) => return resolve_failure_json(self, error),
+            Err(error) => {
+                if let Some(logger) = self.ambient_logger() {
+                    logger.log_error("find_related", &detail, error.summary());
+                }
+                return resolve_failure_json(self, error);
+            }
         };
-        let hits = mycelia_core::find_relationships(&resolved.database, &request.symbol, direction)
-            .map_err(|error| error.to_string())?;
+        let hits = match mycelia_core::find_relationships(
+            &resolved.database,
+            &request.symbol,
+            direction,
+        )
+        .map_err(|error| error.to_string())
+        {
+            Ok(hits) => hits,
+            Err(error) => {
+                if let Some(logger) = self.logger_for(&resolved) {
+                    logger.log_error("find_related", &detail, &error);
+                }
+                return Err(error);
+            }
+        };
+        if let Some(logger) = self.logger_for(&resolved) {
+            logger.log_find_related(&request.symbol, direction.as_str(), hits.len());
+        }
         let value = related_json(&hits, direction, &request.symbol, resolved.name.as_deref());
         serde_json::to_string(&value).map_err(|error| error.to_string())
     }
@@ -421,8 +508,11 @@ impl MyceliaServer {
             }
             ServerTarget::Database { .. } => None,
         };
-        serde_json::to_string(&corpus_listings(all, default_name.as_deref()))
-            .map_err(|error| error.to_string())
+        let listings = corpus_listings(all, default_name.as_deref());
+        if let Some(logger) = self.ambient_logger() {
+            logger.log_list_corpora(listings.len());
+        }
+        serde_json::to_string(&listings).map_err(|error| error.to_string())
     }
 }
 
@@ -541,25 +631,47 @@ fn split_namespaced_chunk_id(chunk_id: &str) -> (Option<&str>, &str) {
 
 fn headers_json(headers: &[SearchHeader], corpus: Option<&str>) -> serde_json::Value {
     let mut value = serde_json::to_value(headers).unwrap_or_else(|_| serde_json::json!([]));
-    if let Some(corpus) = corpus
-        && let Some(items) = value.as_array_mut()
-    {
+    if let Some(items) = value.as_array_mut() {
         for item in items {
             if let Some(object) = item.as_object_mut() {
-                if let Some(raw_id) = object.get("chunk_id").and_then(|value| value.as_str()) {
+                if let Some(corpus) = corpus {
+                    if let Some(raw_id) = object.get("chunk_id").and_then(|value| value.as_str()) {
+                        object.insert(
+                            "chunk_id".to_owned(),
+                            serde_json::Value::String(format!("{corpus}:{raw_id}")),
+                        );
+                    }
                     object.insert(
-                        "chunk_id".to_owned(),
-                        serde_json::Value::String(format!("{corpus}:{raw_id}")),
+                        "corpus".to_owned(),
+                        serde_json::Value::String(corpus.to_owned()),
                     );
                 }
-                object.insert(
-                    "corpus".to_owned(),
-                    serde_json::Value::String(corpus.to_owned()),
-                );
+                trim_header_object(object);
             }
         }
     }
     value
+}
+
+/// Strips header fields the model cannot act on so the find/related payload stays
+/// lean enough to arrive inline rather than be spilled to a temp file the model
+/// then reads back (which trains the native-read reflex). Internal accounting
+/// keeps the full `SearchHeader`; this trims only the model-facing JSON. Drops
+/// `source_hash` and `extractor` (internal provenance), the byte offsets in `span`
+/// (a scoped file read needs line ranges, not byte ranges), the redundant standalone
+/// duplicated `synopsis` whenever a precise `signature` is present. Keeps the small
+/// `corpus` field and the namespaced `chunk_id` so a file-less client can still
+/// retrieve.
+fn trim_header_object(object: &mut serde_json::Map<String, serde_json::Value>) {
+    object.remove("source_hash");
+    object.remove("extractor");
+    if object.contains_key("signature") {
+        object.remove("synopsis");
+    }
+    if let Some(span) = object.get_mut("span").and_then(|value| value.as_object_mut()) {
+        span.remove("byte_start");
+        span.remove("byte_end");
+    }
 }
 
 fn parse_direction(value: Option<&str>) -> McpToolResult<Direction> {
@@ -585,9 +697,7 @@ fn related_json(
     corpus: Option<&str>,
 ) -> serde_json::Value {
     let mut items = serde_json::to_value(hits).unwrap_or_else(|_| serde_json::json!([]));
-    if let Some(corpus) = corpus
-        && let Some(array) = items.as_array_mut()
-    {
+    if let Some(array) = items.as_array_mut() {
         for item in array {
             let Some(object) = item.as_object_mut() else {
                 continue;
@@ -598,17 +708,18 @@ fn related_json(
             else {
                 continue;
             };
-            let Some(raw_id) = definition
-                .get("chunk_id")
-                .and_then(|value| value.as_str())
-                .map(str::to_owned)
-            else {
-                continue;
-            };
-            definition.insert(
-                "chunk_id".to_owned(),
-                serde_json::Value::String(format!("{corpus}:{raw_id}")),
-            );
+            if let Some(corpus) = corpus
+                && let Some(raw_id) = definition
+                    .get("chunk_id")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_owned)
+            {
+                definition.insert(
+                    "chunk_id".to_owned(),
+                    serde_json::Value::String(format!("{corpus}:{raw_id}")),
+                );
+            }
+            trim_header_object(definition);
         }
     }
     serde_json::json!({
@@ -799,10 +910,19 @@ mod tests {
         let headers: serde_json::Value = serde_json::from_str(&output).expect("parse headers");
         let headers = headers.as_array().expect("header array");
         assert_eq!(headers.len(), 1);
+        // The trimmed model-facing payload keeps line ranges and the chunk id but
+        // drops internal provenance (source_hash, byte offsets).
+        assert!(headers[0]["span"]["line_start"].is_number());
+        assert!(headers[0]["source_hash"].is_null(), "source_hash is trimmed");
+        assert!(headers[0]["span"]["byte_start"].is_null(), "byte offsets are trimmed");
+        // Self-heal is still provable through the core API hash, which retains it.
+        let healed_hash = mycelia_core::find(&database, "needle", 5).expect("find")[0]
+            .chunk
+            .source_hash
+            .clone();
         assert_ne!(
-            headers[0]["source_hash"].as_str().expect("source hash"),
-            indexed_hash,
-            "header must carry the current source hash, not the stale one"
+            healed_hash, indexed_hash,
+            "find must re-index drifted source, not serve the stale hash"
         );
         assert!(
             mycelia_core::find(&database, "original", 5)

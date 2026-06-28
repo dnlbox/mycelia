@@ -231,6 +231,12 @@ enum Command {
     Serve {
         #[command(flatten)]
         target: AnyTarget,
+        /// Resolve the project-local corpus from this root instead of the launch
+        /// directory. `connect` writes this for project-local corpora so the
+        /// server hits the same index and log no matter where the harness
+        /// spawns it.
+        #[arg(long)]
+        project_root: Option<PathBuf>,
         /// Serve lexical-only (reranked FTS5), skipping the embedding model load.
         #[arg(long)]
         lexical: bool,
@@ -574,10 +580,19 @@ where
             Ok(())
         }
 
-        Command::Serve { target, lexical } => {
+        Command::Serve {
+            target,
+            project_root,
+            lexical,
+        } => {
             let resolved = target.resolve_serve()?;
-            let launch_cwd = std::env::current_dir()
-                .map_err(|error| format!("cannot determine current directory: {error}"))?;
+            // A pinned --project-root makes resolution independent of the cwd
+            // the harness happens to spawn us in; otherwise fall back to it.
+            let launch_cwd = match project_root {
+                Some(root) => root,
+                None => std::env::current_dir()
+                    .map_err(|error| format!("cannot determine current directory: {error}"))?,
+            };
             mcp::serve(
                 resolved.database,
                 resolved.fallback_corpus,
@@ -772,13 +787,19 @@ fn cmd_connect(harness: Option<Harness>, target: CwdTarget) -> Result<()> {
         .to_owned();
 
     let server_name = "mycelia";
-    // For project-local corpora the server self-discovers via cwd; for registry
-    // corpora pin the name so the server resolves the right database.
+    // Pin the target so the server resolves the same index and log regardless of
+    // the cwd the harness spawns it in: a project root for project-local corpora,
+    // the corpus name for registry corpora.
     let corpus_name = resolved.corpus_name.as_deref().unwrap_or("");
-    let serve_args: Vec<&str> = if resolved.project_local {
-        vec!["serve"]
-    } else {
-        vec!["serve", "--corpus", corpus_name]
+    let project_root = resolved
+        .corpus_root
+        .as_deref()
+        .and_then(Path::to_str)
+        .map(str::to_owned);
+    let serve_args: Vec<&str> = match (resolved.project_local, project_root.as_deref()) {
+        (true, Some(root)) => vec!["serve", "--project-root", root],
+        (true, None) => vec!["serve"],
+        (false, _) => vec!["serve", "--corpus", corpus_name],
     };
 
     match harness {
