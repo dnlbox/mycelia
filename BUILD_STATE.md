@@ -40,12 +40,18 @@ Agent working area. A fresh session reads this top to bottom, then follows
   `.mycelia/config.toml` resolves for status/find/serve with no registry entry;
   legacy registry and explicit flags still work; 120 tests; release build;
   project-local MCP exchange with correct corpus namespacing.
-- Next implementation slice: Phase A / Slice A2, `mycelia init`. Creates
-  `.mycelia/config.toml`, `.mycelia/AGENTS.md`, `db/ logs/ cache/`
-  directories, and `.mycelia/.gitignore`; indexes and embeds into
-  `.mycelia/db/index.sqlite3`; optionally previews + applies a one-line include
-  into a root `AGENTS.md` or `CLAUDE.md`. Idempotent. No writes outside
-  `.mycelia/` without confirmation.
+- Latest shipped slice: Phase A / Slice A2, `mycelia init`. Creates
+  `.mycelia/` tree (config.toml, AGENTS.md fragment, .gitignore, db/logs/cache
+  dirs); indexes into `.mycelia/db/index.sqlite3` via existing pipeline;
+  consent-gated one-line owned block into any root AGENTS.md or CLAUDE.md
+  (idempotent replace-in-place, never duplicates). Verified: tree created,
+  config.toml not overwritten on re-run, guidance block applied/updated on y /
+  skipped on n; `mycelia status` from project cwd resolves via config.toml
+  alone; 131 tests; fmt/clippy clean; release build.
+- Next implementation slice: Phase B / Slice B1, guidance plane. Per harness
+  (Codex, Claude Code), detect and wire a consent-gated, idempotent, removable
+  owned block into the harness instruction convention. For Claude Code, also
+  write a project `.claude/settings.json` eager tool-load entry.
 - Blockers: none.
 
 ## Decisions
@@ -107,6 +113,8 @@ Agent working area. A fresh session reads this top to bottom, then follows
   provable wedge -> hardening -> library with an explicit publish-or-shelf gate.
 - 2026-06-28: Phase A / Slice A1 — project config resolution shipped. New
   `project.rs`; resolution ladder across `main.rs` and `mcp.rs`; 120 tests.
+- 2026-06-28: Phase A / Slice A2 — `mycelia init` shipped. Tree creation,
+  `--no-embed`, consent-gated guidance include, idempotent; 131 tests.
 
 ## Archive
 

@@ -108,6 +108,15 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Initialise Mycelia in the current project. Creates `.mycelia/`, indexes,
+    /// and optionally wires guidance into existing root AGENTS.md or CLAUDE.md.
+    Init {
+        /// Project root. Defaults to the git root of the current directory.
+        path: Option<PathBuf>,
+        /// Skip embedding (useful offline or in tests).
+        #[arg(long)]
+        no_embed: bool,
+    },
     /// Register, index, and embed a corpus. Defaults to the git root of the
     /// current directory. Idempotent: re-running refreshes the corpus.
     Setup {
@@ -440,6 +449,7 @@ where
     };
 
     match cli.command {
+        Command::Init { path, no_embed } => cmd_init(path, no_embed),
         Command::Setup {
             path,
             name,
@@ -581,6 +591,91 @@ fn prepare_embedding_provider(database: &Path) -> Result<semantic::FastEmbedProv
 }
 
 // Journey commands
+
+fn cmd_init(path: Option<PathBuf>, no_embed: bool) -> Result<()> {
+    let root = match path {
+        Some(p) => p
+            .canonicalize()
+            .map_err(|e| format!("invalid path {}: {e}", p.display()))?,
+        None => {
+            let cwd = std::env::current_dir()
+                .map_err(|e| format!("cannot determine current directory: {e}"))?;
+            profile::git_root(&cwd)
+                .ok_or_else(|| "not in a git repository; provide an explicit path".to_string())?
+        }
+    };
+
+    let name = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(str::to_owned)
+        .ok_or_else(|| "cannot derive project name from path".to_string())?;
+
+    eprintln!(
+        "Initialising Mycelia project '{name}' at {}...",
+        root.display()
+    );
+
+    project::init_project(&root, &name)?;
+    eprintln!("  created .mycelia/");
+
+    let database = root.join(".mycelia").join("db").join("index.sqlite3");
+
+    eprintln!("Indexing...");
+    let index_report = mycelia_core::index_corpus(&root, &database).map_err(|e| e.to_string())?;
+    eprintln!(
+        "  {} chunks from {} files ({} removed, {} rejected)",
+        index_report.chunks_written,
+        index_report.indexed,
+        index_report.removed,
+        index_report.rejected
+    );
+
+    if !no_embed {
+        let mut provider = prepare_embedding_provider(&database)?;
+        let report = mycelia_core::refresh_embeddings(&database, &mut provider)
+            .map_err(|e| e.to_string())?;
+        eprintln!(
+            "  {} embedded, {} unchanged, {} stored",
+            report.embedded,
+            report.unchanged,
+            format_bytes(report.storage_bytes as u64)
+        );
+    }
+
+    // Consent-gated guidance: detect root instruction files, preview, and apply
+    // only when the user confirms.
+    let guidance_files = project::detect_guidance_files(&root);
+    for file in &guidance_files {
+        let rel = file.strip_prefix(&root).unwrap_or(file.as_path());
+        eprintln!();
+        eprintln!("Found {}", rel.display());
+        eprintln!("Would add to {}:", rel.display());
+        eprintln!("---");
+        eprint!("{}", project::guidance_include_preview());
+        eprintln!("---");
+        eprint!("Add guidance include? [y/N] ");
+
+        use std::io::Write;
+        std::io::stderr().flush().ok();
+
+        let mut input = String::new();
+        std::io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| format!("failed to read input: {e}"))?;
+
+        if input.trim().eq_ignore_ascii_case("y") {
+            project::insert_guidance_include(file)?;
+            eprintln!("  added guidance to {}", rel.display());
+        } else {
+            eprintln!("  skipped");
+        }
+    }
+
+    eprintln!();
+    eprintln!("Done. Run `mycelia connect <harness>` to wire it into your AI tool.");
+    Ok(())
+}
 
 fn cmd_setup(path: Option<PathBuf>, name_flag: Option<String>, no_embed: bool) -> Result<()> {
     // Determine root: explicit path or git root of cwd.

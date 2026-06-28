@@ -5,6 +5,10 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
+fn init_git(root: &Path) {
+    fs::create_dir_all(root.join(".git")).expect("create .git dir");
+}
+
 fn bin_path() -> &'static str {
     env!("CARGO_BIN_EXE_mycelia")
 }
@@ -894,6 +898,171 @@ fn help_flag_exits_zero_on_stdout() {
             "help must not be framed as an error:\n{stdout}"
         );
     }
+}
+
+#[test]
+fn init_creates_project_tree_and_is_idempotent() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path();
+    init_git(root);
+    write_file(&root.join("README.md"), "# hello");
+
+    // First run: decline the guidance include by piping "n".
+    let output = Command::new(bin_path())
+        .args(["init", "--no-embed", root.to_str().expect("root")])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            child.stdin.take(); // drop stdin immediately = EOF => "N" branch
+            child.wait_with_output()
+        })
+        .expect("run init");
+
+    assert!(
+        output.status.success(),
+        "init failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mycelia = root.join(".mycelia");
+    assert!(mycelia.join("config.toml").is_file(), "config.toml missing");
+    assert!(mycelia.join("AGENTS.md").is_file(), "AGENTS.md missing");
+    assert!(mycelia.join(".gitignore").is_file(), ".gitignore missing");
+    assert!(mycelia.join("db").is_dir(), "db/ missing");
+    assert!(mycelia.join("logs").is_dir(), "logs/ missing");
+    assert!(mycelia.join("cache").is_dir(), "cache/ missing");
+    assert!(
+        mycelia.join("db").join("index.sqlite3").is_file(),
+        "index.sqlite3 missing after init"
+    );
+
+    // Second run must succeed (idempotent) and not duplicate config.toml.
+    let second = Command::new(bin_path())
+        .args(["init", "--no-embed", root.to_str().expect("root")])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            child.stdin.take();
+            child.wait_with_output()
+        })
+        .expect("run init again");
+
+    assert!(
+        second.status.success(),
+        "second init failed:\n{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+
+    // The database path from the first init must still resolve for status.
+    let status = Command::new(bin_path())
+        .args([
+            "status",
+            "--database",
+            mycelia
+                .join("db")
+                .join("index.sqlite3")
+                .to_str()
+                .expect("db"),
+        ])
+        .output()
+        .expect("run status");
+    assert!(
+        status.status.success(),
+        "status after init failed:\n{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+}
+
+#[test]
+fn init_applies_guidance_include_on_confirmation() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path();
+    init_git(root);
+    write_file(&root.join("AGENTS.md"), "# Existing\n\nSome content.\n");
+
+    // Pipe "y\n" to confirm the guidance include.
+    let mut child = Command::new(bin_path())
+        .args(["init", "--no-embed", root.to_str().expect("root")])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn init");
+
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(b"y\n")
+        .expect("write y");
+    let output = child.wait_with_output().expect("wait init");
+
+    assert!(
+        output.status.success(),
+        "init with y failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let agents = fs::read_to_string(root.join("AGENTS.md")).expect("read AGENTS.md");
+    assert!(
+        agents.contains("<!-- BEGIN mycelia -->"),
+        "guidance block not written:\n{agents}"
+    );
+    assert!(
+        agents.contains(".mycelia/AGENTS.md"),
+        "guidance block should reference .mycelia/AGENTS.md:\n{agents}"
+    );
+    assert!(
+        agents.contains("Some content."),
+        "existing content should be preserved:\n{agents}"
+    );
+    assert_eq!(
+        agents.matches("<!-- BEGIN mycelia -->").count(),
+        1,
+        "block should appear exactly once:\n{agents}"
+    );
+}
+
+#[test]
+fn init_declining_guidance_leaves_root_file_unchanged() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path();
+    init_git(root);
+    let original = "# My Project\n";
+    write_file(&root.join("CLAUDE.md"), original);
+
+    let mut child = Command::new(bin_path())
+        .args(["init", "--no-embed", root.to_str().expect("root")])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn init");
+
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(b"n\n")
+        .expect("write n");
+    let output = child.wait_with_output().expect("wait init");
+
+    assert!(
+        output.status.success(),
+        "init declined failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let claude = fs::read_to_string(root.join("CLAUDE.md")).expect("read CLAUDE.md");
+    assert_eq!(
+        claude, original,
+        "CLAUDE.md must be unchanged when user declines"
+    );
 }
 
 #[test]
