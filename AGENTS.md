@@ -76,9 +76,10 @@ implemented baseline is deterministic discovery, range-addressed UTF-8 chunks,
 content-hash freshness, SQLite persistence, deterministic FTS5 reranking, raw
 FTS5/BM25 and substring reference adapters, and manifest-driven retrieval
 evaluation through a CLI. A read-only stdio MCP server exposes `find`, `retrieve`,
-`search_codebase`, `locate_implementation`, and `list_corpora` against registered
-local corpus profiles, resolving the corpus per request while preserving explicit
-`--database` mode for fixtures and diagnostics. Named corpus profiles map
+`search_codebase`, `locate_implementation`, `find_related`, and `list_corpora`
+against registered local corpus profiles, resolving the corpus per request while
+preserving explicit `--database` mode for fixtures and diagnostics. Named corpus
+profiles map
 stable client-facing names to canonical roots and derived local database paths. A
 measured local embedding adapter provides brute-force vector and lexical-spine
 hybrid reference strategies. Query-class routing (`docs/concept/13`) is the CLI
@@ -101,6 +102,11 @@ model-spend approval. A first typed-edge slice (`23`) adds a deterministic,
 sourced, depth-1 Rust `calls` graph: `chunks.symbol` identity, an `edges` table
 addressed by callee name with query-time resolution, a read-only `graph` CLI
 command, and one parameterized `find_related` MCP tool (callers/callees).
+Concept `24` captured the dogfood/adoption failure. The active planning frame is
+now the v2 concept pack (`docs/concept/v2/`): project-attached context
+infrastructure under `.mycelia/`, one cwd-discovered MCP, consent-gated writes
+outside `.mycelia/`, CI/headless-agent preparation, artifact/cache sharing, and
+library-friendly core adoption. No v2 CLI behavior has shipped yet.
 TypeScript/Python/Ruby edges, other edge types, method-call resolution, INFERRED
 edges, MCP mutation tools, watchers, federation, and specialized performance
 storage are deferred.
@@ -141,6 +147,10 @@ Run these gates in order:
     through the built binary against a freshly indexed corpus and confirm the
     relationships are sourced and free of false edges; re-run the retrieval eval
     to confirm the additive schema does not regress the token-per-answer gate.
+11. For Mycelia slices, record dogfood evidence: use Mycelia `find`/`retrieve`
+    for orientation after mandatory protocol-file reads, then close with
+    `mycelia stats --corpus mycelia --recent 20` or explicitly explain why
+    Mycelia was not the right path.
 
 ### Stack-specific rules
 
@@ -219,6 +229,46 @@ Run these gates in order:
 - Keep the graph surface to one parameterized `find_related` MCP tool, not
   several, so tool count does not feed the harness tool-search deferral (`22`).
 
+#### Dogfood and adoption (slice `24`)
+
+- MCP availability is not adoption. Treat agent use of Mycelia as a measured
+  product behavior: every slice should either show recent `find`/`retrieve` log
+  activity or state why direct shell/source reads were appropriate.
+- Keep `stats` as the adoption and value dashboard rather than adding a competing
+  top-level `doctor adoption` command. Planned direction: `stats --all`, clearer
+  zero-use language, and recent-activity hints for verifying harness use.
+- Do not silently mutate project instruction files during `setup` or default
+  `connect`. Any harness guidance must be explicit, idempotent, visible to the
+  user, and easy to remove.
+- Prefer soft, opt-in guidance over hard hooks. A hook may remind before broad
+  grep/read operations in a registered corpus, but it must never block the
+  original command.
+- Keep the visible user journey focused on `setup`, `connect`, `stats`, `status`,
+  `refresh`, `list`, and `delete`. Keep `find`, `retrieve`, `graph`, `eval`,
+  `embed`, `index`, and `serve` available for diagnostics, tests, power users,
+  and harness plumbing, but do not let them dominate onboarding help.
+
+#### V2 project integration
+
+- Treat `.mycelia/` as the default project-owned integration boundary. Planned
+  files include `.mycelia/config.toml`, `.mycelia/AGENTS.md`, `.mycelia/db/`,
+  `.mycelia/logs/`, `.mycelia/cache/`, and optional artifacts.
+- Do not write outside `<project>/.mycelia/` without showing the exact change and
+  getting confirmation. This includes root `AGENTS.md`, `CLAUDE.md`, `.gitignore`,
+  CI workflow files, and user-level harness config.
+- The v2 MCP shape is one generic server that resolves the current project from
+  cwd and `.mycelia/config.toml`; legacy named corpus profiles are migration and
+  fallback, not the center of the new journey.
+- Prefer ignored local DBs and CI/artifact sharing over committed SQLite by
+  default. Committing `.mycelia/db/` is explicit advanced mode only.
+- Headless CI agents are a first-class adoption path: prepare or restore the
+  project index before the LLM starts broad exploration, seed compact context
+  from ticket/issue text, and measure token reduction.
+- Preserve v1 correctness requirements during the rewrite: two-stage
+  `find`/`retrieve`, no stale slices, query-time freshness validation,
+  deterministic chunk identity, eval-manifest exclusion, and token-per-answer
+  gates.
+
 #### Observability (slice `19`)
 
 - Write one structured log line per meaningful event to
@@ -227,7 +277,7 @@ Run these gates in order:
   `find`, `retrieve`.
 - On every `find`, compute and append a token-savings estimate: actual tokens
   returned (sum of distilled header bytes ÷ 4) vs tokens-if-cold (sum of live
-  source file sizes ÷ 4 — read the files, do not estimate from stored metadata).
+  source file sizes ÷ 4, read the files, do not estimate from stored metadata).
   Record both figures in the log line.
 - Rotate or cap log files to bound disk usage; exact threshold chosen at
   implementation time.

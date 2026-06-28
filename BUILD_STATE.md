@@ -5,372 +5,97 @@ Agent working area. A fresh session reads this top to bottom, then follows
 
 ## Now
 
-- Latest slice: typed graph edges, first vertical SHIPPED
-  (`docs/concept/23_typed_graph_edges.md`). Deterministic depth-1 Rust `calls`
-  graph.
-- Implemented: migration 005 adds `chunks.symbol` (indexed) and an `edges` table
-  addressed by callee name with `ON DELETE CASCADE` (edges die with their chunk
-  on reindex). `extract_rust` populates the symbol and collects `calls` edges
-  from free-function, path, and macro sites; method calls are dropped (receiver
-  type unknown, would misresolve). Core `find_relationships(symbol, direction)`
-  resolves callee names at query time: unique name -> resolved, ambiguous name ->
-  every candidate with `resolved=false`, external/no-def -> dropped in both
-  callers and callees directions. Surfaced via read-only CLI `graph <symbol>
-  --direction callers|callees` and one parameterized `find_related` MCP tool.
-  `status` reports graph coverage.
-- Implemented (correctness fixes the graph exposed): `refresh` now does a genuine
-  forced full re-index (`reindex_corpus`) so the graph backfills onto unchanged
-  corpora; a read open upgrades an out-of-date schema in place so an existing v4
-  corpus does not fail `find` on the new `symbol` column.
-- Validation: fmt, clippy, 116 tests (86 core, 16 CLI, 14 bin); release build;
-  release-binary fixture graph check confirms external names like `println` are
-  omitted; real stdio MCP exchange lists `find`/`retrieve`/`find_related`, calls
-  `find_related`, and exits cleanly; isolated `setup`/`status`/`graph`/`connect
-  codex` passed. Release-binary live graph check on the self-indexed repo (callers of
-  `chunk_record_from_row` = `find_fts5_candidates` + `relationship_callers`;
-  callees = sourced `row_i64_to_usize` calls, no false `get` edge). Fresh
-  release-binary Forge refresh produced 12552 chunks, 12552 embeddings, and 2763
-  graph edges over 479 symbols. Current 68-case eval: routed 50/68 (baseline
-  36/40 @ 1212.4 tokens/answer, expanded 13/18 @ 1941.7, paraphrase 1/10 @
-  709.0; weighted aggregate 1391.9). fts5-reranked is 48/68 at weighted 1395.9,
-  so routed remains slightly ahead on the refreshed corpus.
-- NEXT SLICE: extend the graph (TS/Python/Ruby edges, `imports`/`implements`,
-  method-call resolution via type info, traversal beyond depth-1), or return to
-  retrieval-quality work on the remaining eval misses under the token gate.
-- Previous slice: duplicate-body header compaction SHIPPED for ranked retrieval.
-- Implemented: `fts5-reranked` and routed final headers collapse exact duplicate
-  chunk bodies after scoring, keeping the first ranked copy and filling the
-  result budget with the next distinct candidate. This prevents cloned
-  boilerplate from crowding out useful results under small limits.
-- Rejected: source-path token weighting. It recovered one expanded case but lost
-  an established baseline hit and worsened tokens per answer, so it did not meet
-  the slice gate.
-- Validation: focused duplicate regression, fmt, clippy, full workspace tests,
-  release build, release-binary Forge refresh, and 68-case eval pass. The graph
-  closeout refresh on 2026-06-27 remeasured the current corpus at routed 50/68
-  (baseline 36/40 @ 1212.4 tokens/answer, expanded 13/18 @ 1941.7,
-  paraphrase 1/10 @ 709.0; weighted aggregate 1391.9). fts5-reranked is 48/68 at
-  weighted 1395.9. This replaces the prior stale 52/68 note for the refreshed
-  Forge corpus; no retrieval default changes are justified by this graph slice.
-- Previous slice: refreshed Forge gate drift DIAGNOSED and repaired.
-- Root cause: `fixtures/eval/*.json` oracle manifests were being indexed into
-  the Forge corpus, so query text and expected source paths could outrank the
-  actual corpus. Discovery now excludes evaluation manifests while preserving
-  other fixture JSON.
-- Validation: fmt, clippy, full workspace tests, release build, release-binary
-  Forge refresh, and 68-case eval pass. Routed recovered from 47/68 to 51/68 on
-  the current tree; fts5-reranked is 47/68. Remaining misses are ordinary
-  ambiguity/ranking misses with expected snippets still present, so retrieval
-  defaults were not changed.
-- Previous slice: single multi-corpus MCP server SHIPPED
-  (`docs/concept/22_multi_corpus_server.md`).
-- Implemented: one registry-backed `serve` process resolves corpus per request
-  from explicit `corpus`, launch cwd, `--corpus` fallback default, or the sole
-  registered corpus. `find`, `search_codebase`, and `locate_implementation` emit
-  `corpus:hash` ids; `retrieve` routes by that id; `list_corpora` lists
-  registered names and roots. Explicit `--database` remains single-database
-  fixture/diagnostic mode.
-- Implemented: `connect` writes one stable `mycelia` entry per harness; Codex,
-  Claude Desktop, and Cursor config writers remove legacy `mycelia-<name>`
-  entries when updating file-backed configs.
-- Validation: focused MCP stdio test, fmt, clippy, CLI crate tests, full
-  workspace tests, release build, and release-binary two-corpus MCP smoke pass.
-- NEXT SLICE: optional retrieval-quality work can target the remaining 17 misses,
-  but only with the same token-per-answer gate. No default change is justified by
-  this repair slice alone.
-- Parallel context: Ruby tree-sitter extraction support shipped in `e115f1d`
-  and passed the full workspace test suite.
-- Milestone: slice `21` distribution readiness SHIPPED. AGENTS.md and concept
-  `21` are reconciled to cargo/curl quick installs, tap staging, and official
-  Homebrew/core later.
-- Implemented: Cargo feature split. Default builds use `semantic-download`;
-  Homebrew/system builds use `--no-default-features --features
-  semantic-system-ort` with FastEmbed dynamic ORT loading and a direct `ort`
-  initialization hook.
-- Implemented: system-ORT runtime lookup. The CLI scans `HOMEBREW_PREFIX`,
-  `/opt/homebrew`, and `/usr/local` for Homebrew `onnxruntime` when built for
-  `semantic-system-ort`.
-- Implemented: `install.sh` curl installer, `cargo install --git` docs, tap
-  staging formula, README install notes, and doc scrub of local absolute paths
-  and credential-source details.
-- Validation: fmt, clippy, 90 tests, default release build, system-ORT release
-  build, shell syntax, and lexical fixture smoke pass. Homebrew/core formula
-  audit waits for the separate formula submission.
-- Corpus: refreshed `forge` is 12,482 chunks, 12,482 embeddings, model
-  `fastembed-5.17.2:BAAI/bge-small-en-v1.5`, db size 51.3 MB.
-- Eval at slice closeout (68-case, refreshed Forge): routed default 51/68
-  (baseline 36/40 @ 1069.9 tokens/answer, expanded 13/18 @ 1939.8,
-  paraphrase 2/10 @ 651.5; weighted aggregate 1275.3 tokens/answer).
-  fts5-reranked is 47/68 at weighted 1302.2 tokens/answer.
-- Publish gate: existing local history contains co-author trailers, so the safe
-  GitHub publish path is a clean public history rather than pushing this full
-  local development history.
-- Blockers: None.
+- Latest shipped slice: concept `23`, typed graph edges, committed as
+  `8d70340 feat: add typed graph edges`. It added migration 005
+  (`chunks.symbol` + `edges`), conservative Rust depth-1 `calls` extraction,
+  CLI `graph`, MCP `find_related`, graph coverage in `status`, forced
+  `refresh` reindex, and schema upgrade on read.
+- Verified checkpoint: fmt, clippy, 116 tests, release build, release-binary
+  graph fixture smoke (including external/no-def names like `println` omitted),
+  real stdio MCP exchange, isolated `setup`/`status`/`graph`/`connect codex`,
+  self-indexed graph smoke, and fresh Forge refresh/eval. Current refreshed
+  Forge gate: routed 50/68 at weighted 1391.9 tokens/answer; fts5-reranked
+  48/68 at weighted 1395.9. No retrieval default change.
+- V2 vision LOCKED and reconciled (2026-06-27): three planes (index, guidance,
+  connection) divided by one consent boundary, the project boundary itself.
+  Canonical spine is `docs/concept/v2/00_vision.md` with `consent-boundary.svg`.
+  Reconciliation banners plus the reworded non-goal landed in `v2/01`, `v2/03`
+  (new guidance-plane convention-detection subsection), `v2/README`, and
+  `concept/24`. No CLI behavior changed.
+- Execution plan written as `ROADMAP.md` (non-concept, repo root): Phase A
+  foundation (`.mycelia/config.toml` resolution + `mycelia init`) -> Phase B
+  provable wedge (`ci seed-context`/`ci prepare` plus a measured headless A/B that
+  is the publish-or-shelf gate) -> Phase C team hardening -> Phase D library API.
+  Sequenced to reach the measured wedge before building artifacts or full
+  convention detection.
+- Next implementation slice: Phase A / Slice A1, project config + cwd resolution
+  preferring `.mycelia/config.toml` with the legacy registry as fallback.
+  Grounded: today resolution is user-level via `infer_from_cwd`
+  (`crates/mycelia-cli/src/profile.rs`) against `~/.config` profiles; A1 adds a
+  new `crates/mycelia-cli/src/project.rs`. The AGENTS.md Project Specifics V2
+  section is reconciled during A1 via the sync-protocols closeout gate.
+- Pending: Daniel reviews `00_vision.md` and `ROADMAP.md` before code starts. The
+  real decision point is Phase B's gate (publish v2 or shelf the project).
+- Blockers: none.
 
 ## Decisions
 
-- 2026-06-25: Start with SQLite plus lexical retrieval because it proves the
-  durable contracts without pretending the final embedding and vector design is
-  known.
-- 2026-06-25: Keep the first path synchronous and safe Rust until measurements
-  justify concurrency or unsafe optimization.
-- 2026-06-25: Invoke Cargo with the stable toolchain directory prepended to `PATH`
-  because the Homebrew rustup shim omits Cargo subcommand discovery.
-- 2026-06-25: Pin rusqlite 0.39 rather than enabling unstable compiler features;
-  rusqlite 0.40's SQLite binding requires `cfg_select`, which Rust 1.92 lacks.
-- 2026-06-25: Evict prior chunks when a changed source is rejected because stale
-  retrieval violates the precision-first contract.
-- 2026-06-25: Exclude the active database and SQLite sidecars from discovery so a
-  database inside its corpus cannot index itself.
-- 2026-06-25: Measure retrieval with sourced hit rate and MRR before selecting a
-  semantic or full-text ranking implementation.
-- 2026-06-25: Promote FTS5/BM25 to default after hit rate improved from 0.55 to
-  0.80 and MRR from 0.308 to 0.541; keep substring as the reference adapter.
-- 2026-06-25: Promote deterministic FTS5 reranking after reaching hit rate 1.00
-  and MRR 0.688 with no regressions on the unchanged 20-case manifest.
-- 2026-06-25: Exclude evaluation manifests from corpus discovery because indexing
-  queries and expected sources contaminates retrieval measurements.
-- 2026-06-25: Keep the reranker as default after the clean 40-case aggregate
-  remained stronger, but treat its weights as provisional because raw FTS5 edged
-  it on the new code-heavy cohort.
-- 2026-06-25: Reject reciprocal-rank fusion after it regressed the 40-case
-  baseline from 35 to 32 hits; do not add tree-sitter for retrieval quality while
-  exact symbol queries already pass.
-- 2026-06-25: Start MCP read-only over stdio with one launch-bound database;
-  mutation tools wait for an explicit capability and consent design.
-- 2026-06-25: Keep the official async MCP SDK and Tokio in `mycelia-cli`;
-  `mycelia-core` remains synchronous and protocol-independent.
-- 2026-06-25: Named corpus profiles store only canonical roots and derive database
-  paths from validated names under local config and data directories.
-- 2026-06-25: Move next to a bounded local semantic probe because lexical
-  retrieval handles exact symbols but leaves measured paraphrase misses; keep
-  brute-force vectors and defer production vector indexing.
-- 2026-06-25: Use FastEmbed with `BAAI/bge-small-en-v1.5` for the probe because it
-  provides local synchronous ONNX inference and a 384-dimensional retrieval model;
-  isolate it behind a provider trait and use fakes in tests.
-- 2026-06-25: Fix the indexing unit before more ranking work. Adopt tree-sitter
-  for code chunk boundaries only (`09`), reversing the earlier no-tree-sitter
-  stance for boundaries while keeping it out of ranking. Symbol chunks, then a
-  distilled two-stage MCP surface (`10`), then a precision-first hybrid (`11`).
-- 2026-06-25: Make tokens per answered query the primary retrieval gate alongside
-  hit rate and MRR, because the product goal is consulting the index over
-  re-reading files.
-- 2026-06-26: Keep reranked FTS5 as default after the lexical-spine hybrid
-  improved hit counts but failed the baseline token-per-answer gate.
-- 2026-06-26: Do not adopt Graphify outright from the local AST bakeoff. It is
-  mature graph prior art, but Mycelia beat it on the current code-only structural
-  gate. Full Graphify document extraction requires an explicit model-spend gate.
-- 2026-06-26: Keep `routed` as explicit opt-in (not default) until typed-edge
-  work shows whether remaining misses are routing failures or structural missing
-  context.
-- 2026-06-26: Write each embedding batch to SQLite immediately after inference
-  (not all at end) so interrupted runs resume rather than restart from zero.
-- 2026-06-26: Add tree-sitter TypeScript and Python grammars; TS/Py structural
-  chunking improved fts5-reranked eval more (34→47/68) than the routed strategy
-  did alone, confirming chunk quality is the primary retrieval lever.
-- 2026-06-26: Bump embedding batch size 128→256 and thread count to
-  available_parallelism(); add live stderr progress counter.
-- 2026-06-26: Resolve slice 13's deferred routed-default condition. Miss analysis
-  showed remaining misses are recall/ranking, not structural missing context, so
-  typed edges would not move the gate. Promote routed to CLI default and add a
-  signature-line coverage signal (gated to identifier-shaped query terms) so
-  symbol definitions outrank references. MCP and sync API stay on reranked FTS5
-  pending a launch-loaded provider (slice 18).
-- 2026-06-26: Route the stdio MCP server by default. Provider lives behind
-  `Arc<Mutex<FastEmbedProvider>>` (router needs `Clone`, handlers take `&self`,
-  `embed_query` needs `&mut`). Load the model once at startup; `serve --lexical`
-  and graceful load-failure fallback keep embeddings non-mandatory. Sync API
-  (`find`/`find_headers`) stays lexical (no provider).
-
-- 2026-06-26 (REVIEWED, approved by user): The stdio MCP server self-heals its
-  launch-bound index. On drift detected during `retrieve` (re-index/prune the
-  touched file) and `find` (validate the top-K's sources, heal drift, re-rank
-  once) it repairs via `refresh_source`. Rationale: the read-only-MCP decision
-  governs the model-facing TOOL surface (no mutation tools, no arbitrary paths);
-  a server maintaining its own bound database is internal upkeep, not a tool, so
-  the surface is preserved. Smallest reversible default: heal only files the
-  query already touched, never fail the call on a heal error, surface a manual
-  `refresh` hint only when the index cannot be repaired. core read APIs
-  (`retrieve`, `find_headers`, `drifted_sources`) stay pure-read; the server
-  composes the write. CLI one-shot commands stay read-only.
-- 2026-06-26: Freshness is precision, not refusal (user direction, supersedes the
-  spec's refuse-on-stale). `retrieve` returns a tagged `Retrieved`
-  (`ok`|`file`|`unavailable`) instead of `Option<ChunkRecord>`. Validate by
-  re-reading and re-hashing the whole source file (no stored mtime to shortcut
-  on; one file per call is negligible). Hash matches → return the precise indexed
-  chunk. Hash differs → return the WHOLE current file read live, so the caller
-  gets real up-to-date code and never needs to reason about a stale flag. Source
-  removed, unreadable, escaped, or non-UTF-8 → `unavailable` signal. The consumer
-  is never handed an indexed chunk whose source changed.
-- 2026-06-26: License Mycelia under Apache-2.0 rather than MIT. The project is
-  intended to be permissive FOSS and embeddable in agent tools, and Apache-2.0's
-  explicit patent grant is the better default for that path.
-- 2026-06-26: A personal Homebrew tap is acceptable as a staging channel to test
-  the `brew tap` / `brew install` experience. The permanent Homebrew target is
-  still Homebrew/core. The formula must build from a tagged source archive and
-  must not use the curl installer.
-- 2026-06-27: Move to a single multi-corpus MCP server (concept `22`). One server
-  resolves the corpus per request: explicit `corpus` arg, else cwd inference, else
-  single corpus, else a `needs_corpus` disambiguation. Reject a search-all
-  default; unnamed cross-corpus search manufactures ambiguity (several corpora
-  with `login()`), and genuine cross-corpus work is the user naming the other
-  corpus as a second scoped call. Redefine `--corpus X` from sole binding to
-  default/fallback (for Claude Desktop, which has no meaningful cwd). Namespace
-  chunk ids `corpus:hash` so `retrieve` stays single-argument. Motivation: 4xN
-  per-corpus tools inflate the aggregate that trips Claude Code's ~10% tool-search
-  deferral threshold, hiding Mycelia behind a search the model never runs; grep is
-  an always-loaded substitute, so aliases and server instructions never load while
-  deferred.
-- 2026-06-27: Collapse exact duplicate chunk bodies in limited ranked headers
-  after scoring. This is a token-budget compaction, not a ranking weight: the
-  first ranked copy wins, and the next distinct candidate fills the result set.
-  Reject source-path token weighting for now because it traded away established
-  hits and worsened tokens per answer.
-- 2026-06-27: Build the first typed-edge slice (concept `23`) as a deterministic
-  depth-1 Rust `calls` graph. Store edges by callee name, resolve at query time
-  (correct under incremental reindex). Conservative per "a wrong connection is
-  worse than none": drop external names, flag ambiguous names with every
-  candidate, and drop method calls entirely (verification caught `row.get()`
-  misresolving to `profile::get`). No extractor-id bump (boundaries unchanged).
-  One parameterized `find_related` MCP tool, not several, per the `22`
-  tool-count/deferral lesson. User approved MCP exposure in this slice.
-- 2026-06-27 (REVERSES the read-never-migrates stance, flagged for review): a
-  read open upgrades an out-of-date database schema in place. Adding `symbol` to
-  the shared chunk SELECT coupled `find`/`retrieve` to v5, so an existing v4
-  corpus would fail on a missing column; reads now migrate the schema (additive,
-  no repopulation) so existing corpora keep working. Consistent with the
-  approved precedent that the server maintains its own bound index as upkeep.
-  Paired with making `refresh` a genuine forced re-index so the graph backfills.
+- 2026-06-27: V2 vision locked as three planes (index, guidance, connection)
+  divided by one consent boundary, the project boundary itself. Inside the repo
+  Mycelia may integrate aggressively when each change is committed, idempotent,
+  removable, and previewed; outside the repo there is exactly one touch,
+  `connect`. "Non-invasive" means nothing hidden and nothing machine-level beyond
+  the one server, not "do not touch instruction files." Spine:
+  `docs/concept/v2/00_vision.md`.
+- 2026-06-27: `connect` is a per-harness-install action (one global server, cwd
+  self-discovery, a single entry in harness settings); `init` is a per-clone
+  action. The "repo carries everything but connection is per-developer" seam is a
+  lifecycle distinction, not a contradiction. Rejected repo-carried `.mcp.json`
+  (one MCP entry per project conflicts with the one-server UX).
+- 2026-06-27: Sequence v2 to reach a measured headless-agent A/B (Phase B in
+  `ROADMAP.md`) as the publish-or-shelf gate before building artifacts, full
+  convention detection, or the library API.
+- 2026-06-27: Treat Mycelia dogfooding as a product gate, not a moral request.
+  Every Mycelia slice should either show recent Mycelia `find`/`retrieve` use or
+  explicitly explain why direct shell/source reads were the better path.
+- 2026-06-27: Keep `stats`, not a new `doctor adoption` command, as the primary
+  user-facing adoption surface. Add `stats --all` before adding another top-level
+  command.
+- 2026-06-27: Do not force MCP use through hard hooks. Prefer transparent
+  harness guidance and optional soft nudges; if project instruction files are
+  written, they must be visible, idempotent, and easy for the user to approve or
+  remove.
+- 2026-06-27: Separate CLI surfaces by audience. User journey verbs are
+  `setup`, `connect`, `stats`, `status`, `refresh`, `list`, and `delete`;
+  diagnostic/manual verbs such as `find`, `retrieve`, `graph`, `eval`, `embed`,
+  `index`, and `serve` may remain for tests and power use but should not dominate
+  onboarding help.
+- 2026-06-27: V2 pivots from user-level harness configuration to project-level
+  self-discovery. Default writes live under `.mycelia/`; writes outside that
+  boundary require preview and confirmation. CI/headless agents become a primary
+  adoption path, not an afterthought.
 
 ## Session log
 
-- 2026-06-27: Shipped the first typed-edge slice (concept `23`): a deterministic
-  depth-1 Rust `calls` graph. Migration 005 (`chunks.symbol` + `edges`),
-  conservative query-time resolution, CLI `graph`, one `find_related` MCP tool,
-  and `status` graph coverage. Verification caught a method-call false positive
-  (`row.get()` -> `profile::get`) and a v4-corpus read break on the new column;
-  fixed by dropping method-call edges, making `refresh` a true forced re-index,
-  upgrading out-of-date schemas in place on read, and omitting external/no-def
-  names from callers as well as callees. 116 tests; release-binary graph and MCP
-  smokes passed; current refreshed Forge gate is routed 50/68 versus
-  fts5-reranked 48/68, with routed still slightly ahead on weighted tokens per
-  answered query.
-- 2026-06-27: Shipped duplicate-body header compaction for `fts5-reranked` and
-  routed retrieval. It fixes cloned-boilerplate crowding in top-K headers and
-  improved that closeout's refreshed Forge gate to fts5-reranked 48/68 and
-  routed 52/68. Source-path token weighting was tested and rejected.
-- 2026-06-27: Diagnosed and repaired Forge gate drift. Evaluation manifests under
-  `fixtures/eval/*.json` were indexed into the live Forge corpus, contaminating
-  retrieval with oracle query/answer text. Discovery now excludes eval manifests;
-  release-binary refresh pruned them and recovered routed eval from 47/68 to
-  51/68. Remaining misses are normal ranking ambiguity, so retrieval defaults are
-  unchanged.
-- 2026-06-27: Shipped concept `22` single multi-corpus MCP server. `serve`
-  resolves corpus per request, emits `corpus:hash` ids, routes `retrieve` by
-  namespace, adds `list_corpora`, and keeps explicit `--database` as diagnostic
-  single-DB mode. `connect` now writes one `mycelia` entry and file-backed
-  adapters remove legacy per-corpus entries. Validation passed except the
-  refreshed live Forge gate drifted to routed 47/68; the following slice traced
-  that to indexed eval manifests and repaired it to 51/68.
-- 2026-06-27: Authored concept `22` (multi-corpus server); reconciled concept
-  `19` connect/golden-path notes and README MCP-surface/roadmap. Live MCP is
-  connected to Claude Desktop (`find`/`retrieve` + aliases verified). Diagnosed
-  why a fresh model still greps: harness tool-search deferral keeps the tools
-  name-only until searched, and an always-loaded grep satisfies the need, so the
-  aliases never load. Loaded-vs-deferred A/B test is pending a working headless
-  `claude` auth path.
-- 2026-06-26: Improved setup/refresh/embed progress: model preparation is now
-  visible before embedding batch counters, batch progress is labeled
-  `Embedding chunks`, and completion summarizes embedded/unchanged/storage.
-- 2026-06-26: Improved MCP adoption affordance without harness hooks:
-  efficiency-first tool descriptions/instructions, aliases `search_codebase` and
-  `locate_implementation`, and `stats --recent` for checking whether agents are
-  actually using Mycelia.
-- 2026-06-26: Improved `connect` discoverability: supported harnesses are typed
-  CLI values shown by `connect --help`, bare `connect`, and invalid harness
-  errors.
-- 2026-06-26: Distribution plan updated: `cargo install --git` and curl are
-  quick installs, `dnlbox/homebrew-mycelia` is a staging tap, and Homebrew/core
-  remains the desired permanent `brew install mycelia` path.
-- 2026-06-26: Added staging Homebrew formula under `packaging/homebrew/Formula`,
-  documented tap and Cargo install paths, and expanded `.gitignore` for local DB,
-  env, editor, log, and smoke-test output.
-- 2026-06-26: CLI polish for stale-install confusion: installer now passes
-  `cargo install --force`, top-level help includes version and journey hints, and
-  retired `mycelia corpus` emits a migration message to `setup`/`status`/`list`.
-- 2026-06-26: Refreshed README to current shipped behavior and changed the repo
-  license from MIT metadata-only to Apache-2.0 with a top-level license file.
-- 2026-06-26: Slice 19 complete; shipped logs, stats/status, path-aware journey
-  commands, setup/refresh/list/delete, and connect for Claude Code, Claude
-  Desktop, Cursor, and Codex. 90 tests pass; release smoke and MCP exchange
-  verified; refreshed Forge gate is routed 52/68.
-- 2026-06-26: Freshness Layer 1 reframed to precision-over-caching per user;
-  `retrieve` returns `ok` (precise chunk) / `file` (whole live file on change) /
-  `unavailable`, never a stale slice. 79 tests pass; built-binary and live-Forge
-  checks confirm fresh→ok and changed→whole-file.
-- 2026-06-26: MCP server self-heals its bound index on drift (`refresh_source`),
-  silently and without interrupting the flow; manual `refresh` is the last
-  resort. Real stdio MCP exchange confirms find/retrieve converge to fresh. 83
-  tests pass.
-- 2026-06-26: Freshness Layer 1 completed; find validates the sources behind its
-  top-K (`drifted_sources`), self-heals drift, and re-ranks once so headers are
-  precise and agree with retrieve. User approved the self-heal decision. 85 tests
-  pass; MCP exchange proves find→retrieve agreement after drift.
-- 2026-06-25: Specialized the ai-protocol scaffold and locked the first milestone.
-- 2026-06-25: First vertical index complete and verified against fixtures and Forge.
-- 2026-06-25: Manifest-driven retrieval evaluator added; first Forge baseline
-  captured with one intentional miss.
-- 2026-06-25: Expanded the Forge baseline to 20 cases; measured substring
-  retrieval at hit rate 0.55 and MRR 0.308.
-- 2026-06-25: FTS5 migration and adapter verified; promoted after the measured
-  20-case comparison.
-- 2026-06-25: Phrase and token-coverage reranking recovered all raw FTS5 misses and
-  became the default strategy.
-- 2026-06-25: Expanded Forge evaluation to 40 cases and measured a clean,
-  self-excluding corpus; reranking led overall while raw FTS5 led the new cohort.
-- 2026-06-25: Tested and removed reciprocal-rank fusion; it recovered one hard
-  code query but lost three established hits.
-- 2026-06-25: Added and verified read-only stdio MCP `find` and `retrieve` tools
-  against a real temporary index.
-- 2026-06-25: Added named corpus profiles, installed the local binary, and built
-  the derived Forge index without repository-specific client paths.
-- 2026-06-25: Redirected the next substantive slice from MCP client configuration
-  to the first measured semantic embedding probe.
-- 2026-06-25: Completed the semantic probe; vectors improved the paraphrase cohort
-  but failed the established precision gate, so reranked FTS5 remains default.
-- 2026-06-25: Steered the plan into the protocol: ordered slices `09` code-aware
-  chunking, `10` distilled MCP surface, `11` precision-first hybrid; aligned the
-  vision/architecture/eval docs and reconciled Project Specifics.
-- 2026-06-25: Slice 09 complete; tree-sitter-rust-v1 extractor promoted; 40-case
-  baseline improved 34→35 hits; structural cohort added (5/8, exact symbols 4/4).
-- 2026-06-25: Slice 10 complete; `find` now returns bounded headers, `retrieve`
-  returns bodies, and eval reports token-per-answer estimates.
-- 2026-06-26: Slice 11 complete; lexical-spine hybrid is selectable, but reranked
-  FTS5 remains default because the hybrid failed the token-efficiency gate.
-- 2026-06-26: Slice 12 complete; Graphify local AST bakeoff recorded and Mycelia
-  kept as the active path pending any approved full-corpus Graphify run.
-- 2026-06-26: Slice 13 complete; query-class routing added (`routed` strategy);
-  routed=41/68 vs hybrid=37, fts5=34 on pre-TS/Py corpus.
-- 2026-06-26: Slice 14 complete; incremental embedding writes; interrupted runs
-  now resume from last committed batch.
-- 2026-06-26: Slice 15 complete; TS/Py tree-sitter extraction; corpus 7411→9410
-  chunks; fts5-reranked 34→47/68; 52 unit tests + 7 CLI tests pass.
-- 2026-06-26: Slice 16 complete; embedding batch 128→256, all-CPU threads, live
-  stderr progress; embed run observable and ~2× faster on cold start.
-- 2026-06-26: Slice 17 complete; signature-coverage reranker signal lifted both
-  strategies (fts5 47→48, routed 50→51) at lower token cost; routed promoted to
-  CLI default with graceful lexical fallback; 66 tests pass.
-- 2026-06-26: Slice 18 complete; stdio MCP server routes by default behind a
-  shared embedding provider, with `--lexical` and load-failure fallback;
-  retrieval surface feature-complete. Review checkpoint flagged before typed edges.
-- 2026-06-26: Authored specs `19` (user journey/observability) and `20`
-  (freshness/staleness). Decided freshness Layer 1 (query-time validation,
-  refuse-on-stale) is the next implementation slice, ahead of journey work and
-  typed edges, because returning stale code outranks tokenomics.
-- 2026-06-26: Multi-agent review concluded; merged security/offline/perf/
-  correctness fixes. Re-validated: 75 tests green, eval steady (routed 51/68,
-  fts5 48/68) at slightly lower token cost. `Now` repointed to Freshness Layer 1.
+- 2026-06-27: Retrospective slice defined concept `24`, compacted
+  `BUILD_STATE.md`, synced Project Specifics, and propagated trigger-based
+  state consolidation plus sync-protocol closeout gates into `ai-protocol`.
+- 2026-06-27: Captured v2 rewrite docs under `docs/concept/v2/`: project-local
+  `.mycelia/` layout, local/team/CI/library journeys, CI headless PR-agent flow,
+  indexer speed/artifact strategy, visibility diagnostics, and carry-forward
+  requirements from v1.
+- 2026-06-27: Reconciled the v2 docs around a three-plane / consent-boundary
+  spine (new `00_vision.md` + `consent-boundary.svg`; banners and fixes in
+  `01`/`03`/`24`/`README`) and wrote `ROADMAP.md` sequencing foundation ->
+  provable wedge -> hardening -> library with an explicit publish-or-shelf gate.
 
 ## Archive
 
-<!-- Completed milestones collapse to one line each; git holds full history. -->
+- 2026-06-25 to 2026-06-26: Built the deterministic SQLite/FTS5 baseline, added
+  code-aware chunking, distilled `find`/`retrieve`, semantic/vector probes,
+  routed retrieval, MCP stdio, freshness/self-heal, named profiles, and journey
+  commands. Old detailed metrics live in git history and concept docs.
+- 2026-06-26 to 2026-06-27: Shipped distribution readiness, install docs,
+  progress polish, MCP adoption descriptions and aliases, Ruby extraction,
+  multi-corpus MCP, eval-manifest exclusion, duplicate-body header compaction,
+  and the first typed graph slice.

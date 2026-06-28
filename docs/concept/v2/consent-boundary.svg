@@ -1,0 +1,55 @@
+<svg width="100%" viewBox="0 0 680 432" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Mycelia v2 coherent vision: the consent boundary</title>
+<desc>The repository holds three repo-owned planes (index, guidance, project identity), all committed and reviewed. The machine holds a single mycelia MCP server, the one out-of-project touch set up once per harness install by mycelia connect, which discovers the current project from cwd. CI and headless agents need no crossing.</desc>
+<style>
+  text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}
+  .th{font-size:14px;font-weight:500}
+  .ts{font-size:12px;font-weight:400}
+  .zone{fill:#0f172a}.zsub{fill:#64748b}
+  .b-card{fill:#e6f1fb;stroke:#7fb1e6;stroke-width:1}.b-t{fill:#0c447c}.b-s{fill:#15598f}
+  .a-card{fill:#fbe9cf;stroke:#d99a3a;stroke-width:1}.a-t{fill:#7c4a0c}.a-s{fill:#8f5a15}
+  .g-card{fill:#eef2f7;stroke:#a9b6c6;stroke-width:1}.g-t{fill:#27323f}.g-s{fill:#4a586a}
+  .bound{stroke:#94a3b8;stroke-width:1.4}
+  .chip{fill:#ffffff;stroke:#94a3b8;stroke-width:1}.chip-t{fill:#475569}
+  .arrow-line{stroke:#d97706;stroke-width:1.6}.arrow-t{fill:#8f5a15}
+  .leg{fill:#475569}
+  @media (prefers-color-scheme:dark){
+    .zone{fill:#e8edf3}.zsub{fill:#94a3b8}
+    .b-card{fill:#11314f;stroke:#2f6ba3}.b-t{fill:#cfe4fa}.b-s{fill:#9cc4ec}
+    .a-card{fill:#4a330f;stroke:#9a6f25}.a-t{fill:#f6dcae}.a-s{fill:#e8c389}
+    .g-card{fill:#1e2733;stroke:#3b4858}.g-t{fill:#d6dee8}.g-s{fill:#9aa7b6}
+    .bound{stroke:#64748b}.chip{fill:#0f1620;stroke:#64748b}.chip-t{fill:#94a3b8}
+    .arrow-line{stroke:#e3a857}.arrow-t{fill:#e8c389}.leg{fill:#94a3b8}
+  }
+</style>
+<defs><marker id="arL" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M1 1 L8 4.5 L1 8 Z" fill="#d97706"/></marker></defs>
+<text class="th zone" x="44" y="56">the repository</text>
+<text class="ts zsub" x="44" y="74">committed, reviewed, in code review</text>
+<text class="th zone" x="410" y="56">the machine</text>
+<text class="ts zsub" x="410" y="74">one touch, once per harness install</text>
+<line class="bound" x1="348" y1="90" x2="348" y2="312" stroke-dasharray="3 4"/>
+<rect class="b-card" x="40" y="100" width="240" height="58" rx="8"/>
+<text class="th b-t" x="56" y="124">index plane</text>
+<text class="ts b-s" x="56" y="143">.mycelia/: db, artifacts, cache</text>
+<rect class="b-card" x="40" y="174" width="240" height="58" rx="8"/>
+<text class="th b-t" x="56" y="198">guidance plane</text>
+<text class="ts b-s" x="56" y="217">wires into CLAUDE.md, AGENTS.md, .mdc</text>
+<rect class="b-card" x="40" y="248" width="240" height="58" rx="8"/>
+<text class="th b-t" x="56" y="272">project identity</text>
+<text class="ts b-s" x="56" y="291">config.toml, found from cwd</text>
+<rect class="a-card" x="410" y="100" width="230" height="80" rx="8"/>
+<text class="th a-t" x="426" y="124">connection plane</text>
+<text class="ts a-s" x="426" y="144">one mycelia MCP server</text>
+<text class="ts a-s" x="426" y="164">in Claude, Codex, Cursor, …</text>
+<line class="arrow-line" x1="410" y1="140" x2="288" y2="140" marker-end="url(#arL)"/>
+<text class="ts arrow-t" x="346" y="131" text-anchor="middle">discovers cwd project</text>
+<rect class="chip" x="292" y="189" width="112" height="22" rx="11"/>
+<text class="ts chip-t" x="348" y="204" text-anchor="middle">consent boundary</text>
+<rect class="g-card" x="40" y="326" width="600" height="46" rx="8"/>
+<text class="th g-t" x="56" y="348">CI / headless agent</text>
+<text class="ts g-s" x="56" y="366">you build the invocation: no crossing, no deferral problem</text>
+<rect class="b-card" x="40" y="392" width="14" height="14" rx="3"/>
+<text class="ts leg" x="60" y="403">repo-owned, with consent</text>
+<rect class="a-card" x="232" y="392" width="14" height="14" rx="3"/>
+<text class="ts leg" x="252" y="403">the one machine touch</text>
+</svg>

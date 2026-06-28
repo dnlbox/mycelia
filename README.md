@@ -36,13 +36,13 @@ queries. Recent measured results on the refreshed local Forge corpus:
 
 | Strategy | Hits | Tokens per answer |
 | --- | ---: | ---: |
-| `fts5-reranked` | 48 / 68 | 1302.1 |
-| `routed` | 52 / 68 | 1275.7 |
+| `fts5-reranked` | 48 / 68 | 1395.9 |
+| `routed` | 50 / 68 | 1391.9 |
 
-The latest repairs exclude evaluation manifests from corpus discovery and collapse
-exact duplicate chunk bodies in limited ranked headers. The duplicate collapse
-keeps cloned boilerplate from crowding out the next distinct candidate.
-`BUILD_STATE.md` records the remaining misses and gate caveats.
+The latest repairs exclude evaluation manifests from corpus discovery, collapse
+exact duplicate chunk bodies in limited ranked headers, and add a conservative
+Rust `calls` graph. `BUILD_STATE.md` records the remaining misses and gate
+caveats.
 
 `routed` is the CLI default and the MCP default when embeddings are available. It
 falls back to reranked FTS5 when a corpus has no embeddings or the cached model is
@@ -216,14 +216,21 @@ retrieval, explicit freshness guarantees, and eventual cross-corpus queries.
 Deferred work is tracked in `docs/concept/` and `BUILD_STATE.md`. The current
 ordering is:
 
-1. Improve retrieval quality on the remaining 68-case Forge misses, but only if
+1. Refine and implement the v2 project-attached integration plan in
+   `docs/concept/v2/`: `.mycelia/` project metadata, cwd-discovered MCP, CI
+   prepare/seed flows, artifact/cache sharing, and consent-gated project
+   instruction integration.
+2. Ship concept `24` carry-forward items: `stats --all`, clearer zero-use
+   signals, visible harness guidance where it remains useful, and slice closeout
+   dogfood evidence.
+3. Improve retrieval quality on the remaining 68-case Forge misses, but only if
    the token-per-answer gate holds.
-2. Add a debounced watcher as a latency optimization for keeping embeddings
+4. Add a debounced watcher as a latency optimization for keeping embeddings
    current after query-time self-heal.
-3. Extend the typed-edge graph (`23`): edges for TypeScript, Python, and Ruby;
+5. Extend the typed-edge graph (`23`): edges for TypeScript, Python, and Ruby;
    `imports`/`implements` edge types; method-call resolution via type
    information; and traversal beyond depth-1.
-4. Add federation and specialized vector or storage layers only after local
+6. Add federation and specialized vector or storage layers only after local
    measurements justify them.
 
 ## License
