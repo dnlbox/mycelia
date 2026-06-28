@@ -54,7 +54,9 @@ Conventions to detect and integrate with include, at least:
 - `CLAUDE.md`,
 - Cursor rules (`.cursor/rules/*.mdc`),
 - Codex project configuration,
-- Antigravity and other harness-specific project rules,
+- Antigravity project rules,
+- OpenCode project configuration and `AGENTS.md`,
+- Kilo project rules,
 - Claude Code project settings (`.claude/settings.json`).
 
 `.mycelia/AGENTS.md` is the source fragment those wirings include or mirror, not
@@ -71,8 +73,8 @@ guidance-plane write, consent-gated like any other, never a user-level mutation.
 ### 3. Connection plane (one machine-level touch)
 
 `mycelia connect` registers one generic Mycelia MCP server in a harness client
-(Claude Code, Codex, Cursor, Claude Desktop). There is one server total, not one
-per project. The server resolves which project and corpus to serve by walking up
+(Codex, Claude Code, Antigravity, OpenCode, Kilo; Cursor and Claude Desktop also
+supported). There is one server total, not one per project. The server resolves which project and corpus to serve by walking up
 from the launch working directory to `.mycelia/config.toml`. This is the only
 action that writes outside the repository, and the user sees a single `mycelia`
 entry in their harness settings.
@@ -96,18 +98,29 @@ Because the single connected server self-discovers the project from cwd, one
 `init`. Guidance and index are repo-carried; connection is a one-time machine
 setup. That division is deliberate, not a seam to close.
 
-## CI and headless agents: adoption by construction
+## Primary path: interactive harness and MCP
 
-The strongest wedge is the headless agent in CI, because it sidesteps the
-adoption problem entirely. In an interactive local session, Mycelia competes for
-the model's attention against an always-available grep reflex. In CI, the harness
-invocation is built by us: `mycelia ci prepare` restores or refreshes the index
-before the model spends tokens, and `mycelia ci seed-context` injects sourced
-orientation (likely files, symbols, tests, queries) into the first prompt without
-depending on the model choosing a tool. This is adoption by construction, not by
-persuasion, and it is where the business claim (fewer tokens, better first
-proposals from issue text) is cleanest to measure. See `04`. Treat the CI wedge
-as the flagship, not a peer of the local journey.
+The primary target is the path the team actually uses: Mycelia attached to a
+project, served to an interactive harness over MCP. The target harnesses are
+Codex, Claude Code, Antigravity, OpenCode, and Kilo. Success on this path means
+the model organically reaches for `find` for orientation instead of grep, and
+reaches the right files for fewer tokens. This is the publish-or-shelf bet.
+
+This path is also the harder one. Interactively, Mycelia competes against an
+always-available grep reflex, and on Claude Code the MCP schema can be deferred so
+the model never sees it. That is exactly why the guidance plane is the crux: per
+harness, the index must be loaded and the "use Mycelia first" instruction must
+reach the model through the convention that harness already reads.
+
+## Secondary path: headless CI agents
+
+Headless CI is a kept, valuable path, and the cleanest measurement environment,
+but it is not the bet. In CI the harness invocation is built by us: `mycelia ci
+prepare` restores or refreshes the index before the model spends tokens, and
+`mycelia ci seed-context` injects sourced orientation into the first prompt
+without depending on the model choosing a tool. That makes it adoption by
+construction and easy to measure, so it corroborates the interactive finding with
+a clean number. See `04`.
 
 ## What this supersedes
 

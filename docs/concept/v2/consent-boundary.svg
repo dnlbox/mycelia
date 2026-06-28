@@ -40,7 +40,7 @@
 <rect class="a-card" x="410" y="100" width="230" height="80" rx="8"/>
 <text class="th a-t" x="426" y="124">connection plane</text>
 <text class="ts a-s" x="426" y="144">one mycelia MCP server</text>
-<text class="ts a-s" x="426" y="164">in Claude, Codex, Cursor, …</text>
+<text class="ts a-s" x="426" y="164">in Codex, Claude Code, …</text>
 <line class="arrow-line" x1="410" y1="140" x2="288" y2="140" marker-end="url(#arL)"/>
 <text class="ts arrow-t" x="346" y="131" text-anchor="middle">discovers cwd project</text>
 <rect class="chip" x="292" y="189" width="112" height="22" rx="11"/>

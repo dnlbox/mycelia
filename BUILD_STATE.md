@@ -22,12 +22,14 @@ Agent working area. A fresh session reads this top to bottom, then follows
   Reconciliation banners plus the reworded non-goal landed in `v2/01`, `v2/03`
   (new guidance-plane convention-detection subsection), `v2/README`, and
   `concept/24`. No CLI behavior changed.
-- Execution plan written as `ROADMAP.md` (non-concept, repo root): Phase A
-  foundation (`.mycelia/config.toml` resolution + `mycelia init`) -> Phase B
-  provable wedge (`ci seed-context`/`ci prepare` plus a measured headless A/B that
-  is the publish-or-shelf gate) -> Phase C team hardening -> Phase D library API.
-  Sequenced to reach the measured wedge before building artifacts or full
-  convention detection.
+- Execution plan written as `ROADMAP.md` (non-concept, repo root). Primary target
+  is the interactive harness + MCP path (Mycelia + project + Codex, Claude Code,
+  Antigravity, OpenCode, Kilo); headless CI is a kept secondary path and the clean
+  corroborating measurement, not the bet. Phase A foundation
+  (`.mycelia/config.toml` resolution + `mycelia init`) -> Phase B interactive path
+  (guidance plane across the target harnesses + a per-harness organic-use A/B that
+  is the publish-or-shelf gate) -> Phase C headless CI -> Phase D hardening ->
+  Phase E library API.
 - Next implementation slice: Phase A / Slice A1, project config + cwd resolution
   preferring `.mycelia/config.toml` with the legacy registry as fallback.
   Grounded: today resolution is user-level via `infer_from_cwd`
@@ -40,6 +42,13 @@ Agent working area. A fresh session reads this top to bottom, then follows
 
 ## Decisions
 
+- 2026-06-27: Primary v2 target is the interactive harness + MCP path (Mycelia +
+  project + Codex, Claude Code, Antigravity, OpenCode, Kilo), and the
+  publish-or-shelf gate is measured there: organic Mycelia use plus
+  tokens-to-right-files vs the grep baseline, per harness. Headless CI stays as a
+  secondary path and the clean corroborating measurement, not the bet. This makes
+  the guidance plane make-or-break, so `ROADMAP.md` promotes it to the primary
+  Phase B and demotes CI to Phase C.
 - 2026-06-27: V2 vision locked as three planes (index, guidance, connection)
   divided by one consent boundary, the project boundary itself. Inside the repo
   Mycelia may integrate aggressively when each change is committed, idempotent,

@@ -106,7 +106,9 @@ Conventions to detect:
 - `CLAUDE.md`
 - Cursor rules (`.cursor/rules/*.mdc`)
 - Codex project configuration
-- Antigravity and other harness-specific project rules
+- Antigravity project rules
+- OpenCode project configuration and `AGENTS.md`
+- Kilo project rules
 - Claude Code project settings (`.claude/settings.json`), including eager tool
   loading so a deferred MCP schema does not lose to grep
 
