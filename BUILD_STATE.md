@@ -24,6 +24,9 @@ Agent working area. A fresh session reads this top to bottom, then follows
   Current finding: first three task probes each called Mycelia once, so MCP
   discoverability is present, but `.mycelia/AGENTS.md` is too weak to teach the
   full MCP surface, tool choice, and few-shot usage.
+  Follow-up finding: thread `019f0c61-0346-7b53-896f-fadd83b92d11` claimed
+  Mycelia use in prose but the raw rollout shows `exec_command` calls rather
+  than Mycelia MCP tool calls. B2 must count transcript-visible MCP calls only.
   Verification plan:
   1. Record before/after token metrics and latency for sample exploration tasks.
   2. Document findings in project evaluation logs or docs.
@@ -32,6 +35,8 @@ Agent working area. A fresh session reads this top to bottom, then follows
      embeddings.
   4. Strengthen generated project guidance before continuing paired runs, then
      verify the template and MCP tool listing with focused tests.
+  5. Treat claimed Mycelia use without actual MCP tool-call records as a guidance
+     failure in B2 measurements.
 - Blockers: none.
 
 ## Decisions
@@ -98,6 +103,7 @@ Agent working area. A fresh session reads this top to bottom, then follows
 - 2026-06-28: Phase B / Slice B1 — guidance plane across target harnesses shipped. Convention detection across AGENTS.md, CLAUDE.md, .claude/settings.json, .agents/AGENTS.md, .codex/instructions.md, .opencode/AGENTS.md, .kilo/AGENTS.md, .cursor/rules/*.mdc. Added JSON comment stripping and eager tool loading update for Claude settings. Extended connect to Antigravity, OpenCode, and Kilo; 134 tests.
 - 2026-06-28: Phase B / Slice B2 measurement protocol started in `docs/evaluations/phase_b2_interactive_measurement.md`; recorded initial Codex observation, kept the publish-or-shelf decision pending paired harness runs, and noted the named `mycelia` corpus needs refresh before controlled measurement.
 - 2026-06-28: Phase B / Slice B2 guidance corrective pass strengthened generated `.mycelia/AGENTS.md` with full MCP tool surface, tool-choice rules, and few-shot patterns; added focused assertions for generated guidance and `find_related` tool listing.
+- 2026-06-28: Phase B / Slice B2 transcript audit found a Codex thread claiming Mycelia use while only issuing shell commands; updated the measurement rule and generated guidance so only visible Mycelia MCP tool calls count as use.
 
 ## Archive
 

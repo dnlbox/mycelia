@@ -21,6 +21,12 @@ fn agents_md_content(name: &str) -> String {
          \n\
          Mandatory protocol files still come first when they define the active\n\
          contract, for example `AGENTS.md`, `BUILD_STATE.md`, or `prompt.md`.\n\
+         Only say you used Mycelia when the transcript shows an actual Mycelia\n\
+         MCP tool call such as `find`, `locate_implementation`,\n\
+         `search_codebase`, `retrieve`, `find_related`, or `list_corpora`.\n\
+         If the MCP tools are not available, say that plainly and use shell\n\
+         search as a fallback. Do not describe `rg`, `grep`, `sed`, `nl`, or\n\
+         direct file reads as Mycelia use.\n\
          \n\
          ## MCP tools\n\
          \n\
@@ -439,6 +445,10 @@ mod tests {
         assert!(
             agents.contains("Few-shot patterns"),
             "AGENTS.md should include usage examples"
+        );
+        assert!(
+            agents.contains("Only say you used Mycelia"),
+            "AGENTS.md should distinguish real MCP calls from claims"
         );
 
         let gi = fs::read_to_string(m.join(".gitignore")).expect("read .gitignore");

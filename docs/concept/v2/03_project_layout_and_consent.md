@@ -83,6 +83,11 @@ Minimum content:
 
 This project has a Mycelia index in `.mycelia/`.
 
+Only say you used Mycelia when the transcript shows an actual Mycelia MCP tool
+call. If MCP tools are unavailable, say that plainly and use shell search as a
+fallback. Do not describe `rg`, `grep`, `sed`, `nl`, or direct file reads as
+Mycelia use.
+
 For code orientation:
 
 1. Use Mycelia `find` first for broad implementation, symbol, or docs discovery.

@@ -42,6 +42,9 @@ Mycelia:
 - The Mycelia MCP server is connected and loaded.
 - The prompt does not explicitly force Mycelia. Organic use is part of the
   measurement.
+- Claimed Mycelia use counts only when the transcript contains an actual Mycelia
+  MCP tool-call record. Shell commands such as `rg`, `grep`, `sed`, `nl`, or
+  direct file reads do not count, even if the agent says "Mycelia found" in prose.
 
 Both variants use the same user prompt, repository checkout, and time budget.
 Do not tell the agent the expected files.
@@ -165,6 +168,7 @@ Success:
 Record these per task, harness, and variant:
 
 - first broad-orientation tool: Mycelia, shell search, direct file read, or other
+- transcript-visible Mycelia MCP tool calls, by name
 - Mycelia `find` calls before first expected file
 - Mycelia `retrieve` calls before first expected file
 - shell search commands before first expected file
@@ -181,6 +185,10 @@ Record these per task, harness, and variant:
 
 For Mycelia runs, also record logged `actual_tok`, `cold_tok`, and savings ratio
 for each `find`.
+
+If the agent claims Mycelia use but the transcript has no Mycelia MCP tool-call
+record, mark `first_broad_orientation_tool` as the actual observed tool and mark
+the run as a guidance failure.
 
 ## Decision Rule
 
@@ -246,6 +254,7 @@ token_count_source: harness | bytes_div_4
 seconds_to_first_expected:
 seconds_to_correct_summary:
 mycelia_stats_delta:
+visible_mycelia_mcp_calls:
 expected_files_hit:
 success:
 notes:
