@@ -86,9 +86,22 @@ This project has a Mycelia index in `.mycelia/`.
 For code orientation:
 
 1. Use Mycelia `find` first for broad implementation, symbol, or docs discovery.
-2. Use `retrieve` for selected chunks.
-3. Use grep/read for exact line edits, literal strings, generated files, and
+2. Use `search_codebase` or `locate_implementation` when those names better
+   match the user task; they are aliases for `find`.
+3. Use `retrieve` for selected chunks.
+4. Use `find_related(symbol, direction)` for callers/callees when relationships
+   matter.
+5. Use `list_corpora` only when another project is named ambiguously.
+6. Use grep/read for exact line edits, literal strings, generated files, and
    fallback after Mycelia misses.
+
+Few-shot patterns:
+
+- "Where is X implemented?" -> `locate_implementation("X implementation")`,
+  then `retrieve` the best chunk.
+- "What calls X?" -> `find_related("X", direction="callers")`.
+- "Orient on the current slice" -> `find` with slice, roadmap, state, and
+  concept keywords, then retrieve the state and roadmap chunks.
 
 The current project corpus is discovered from `.mycelia/config.toml`.
 ```
@@ -186,4 +199,3 @@ mycelia init --commit-index
 
 It must print a warning, explain binary conflict risk, and confirm before
 changing ignore rules.
-

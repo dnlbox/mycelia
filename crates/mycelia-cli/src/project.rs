@@ -13,15 +13,64 @@ const GITIGNORE_CONTENT: &str = "db/\nlogs/\ncache/\nartifacts/\n";
 
 fn agents_md_content(name: &str) -> String {
     format!(
-        "# Mycelia index\n\
+        "# Mycelia project context\n\
          \n\
-         This project ({name}) is indexed with Mycelia. Use these tools before\n\
-         reading files broadly:\n\
+         This project ({name}) has a Mycelia index. Use Mycelia before broad\n\
+         shell search or file reads when you are orienting, locating an\n\
+         implementation, tracing related code, or looking for docs.\n\
          \n\
-         - `find(\"your question\")` — ranked chunk headers (paths, signatures, scores)\n\
-         - `retrieve(\"chunk_id\")` — full body, validated against disk\n\
+         Mandatory protocol files still come first when they define the active\n\
+         contract, for example `AGENTS.md`, `BUILD_STATE.md`, or `prompt.md`.\n\
          \n\
-         Run `mycelia status` to check index health, `mycelia refresh` to rebuild.\n"
+         ## MCP tools\n\
+         \n\
+         - `find(query, limit?, corpus?)`: cheap first-pass orientation. Returns\n\
+           ranked headers with paths, line ranges, signatures or synopses,\n\
+           scores, and namespaced chunk ids. Use this before grep/read for broad\n\
+           discovery.\n\
+         - `search_codebase(query, limit?, corpus?)`: alias for `find`; use when\n\
+           the task says search the codebase or find relevant files.\n\
+         - `locate_implementation(query, limit?, corpus?)`: alias for `find`; use\n\
+           when the task asks where behavior is implemented or which symbols\n\
+           support a feature.\n\
+         - `retrieve(chunk_id)`: fetch the selected chunk body after a Mycelia\n\
+           search. Retrieval validates against disk and never serves a stale\n\
+           indexed slice.\n\
+         - `find_related(symbol, direction, corpus?)`: inspect sourced `calls`\n\
+           relationships. Use `direction=\"callers\"` for who calls a symbol and\n\
+           `direction=\"callees\"` for what a symbol calls.\n\
+         - `list_corpora()`: disambiguate available corpora only when the user\n\
+           names another project or Mycelia asks for a corpus.\n\
+         \n\
+         ## Tool choice\n\
+         \n\
+         1. For broad orientation, call `find`, `search_codebase`, or\n\
+            `locate_implementation` before shell search.\n\
+         2. Retrieve only the most relevant chunks, usually one to three, then\n\
+            read exact files or lines for edits and verification.\n\
+         3. Use `find_related` for call graph questions instead of trying to infer\n\
+            relationships from text search.\n\
+         4. Use grep/read directly for exact literals, known files, generated\n\
+            output, lockfiles, or after Mycelia misses.\n\
+         5. If the first result set is broad, refine the Mycelia query once before\n\
+            falling back to grep.\n\
+         \n\
+         ## Few-shot patterns\n\
+         \n\
+         - User asks \"where is X implemented?\" -> call\n\
+           `locate_implementation(\"X implementation\")`, then retrieve the best\n\
+           chunk.\n\
+         - User asks \"what calls X?\" -> call\n\
+           `find_related(\"X\", direction=\"callers\")`, then retrieve sourced\n\
+           hits as needed.\n\
+         - User asks for current project direction -> call `find` with the slice,\n\
+           roadmap, state, and concept keywords, then retrieve the state and\n\
+           roadmap chunks.\n\
+         - User gives an exact file path or line -> read that path directly;\n\
+           Mycelia is not needed for exact lookup.\n\
+         \n\
+         Run `mycelia status` to check index health and `mycelia stats --recent 20`\n\
+         to verify whether agents are using Mycelia.\n"
     )
 }
 
@@ -379,6 +428,18 @@ mod tests {
             "AGENTS.md should mention corpus name"
         );
         assert!(agents.contains("find("), "AGENTS.md should mention find");
+        assert!(
+            agents.contains("locate_implementation"),
+            "AGENTS.md should mention the implementation-hunt alias"
+        );
+        assert!(
+            agents.contains("find_related"),
+            "AGENTS.md should mention graph relationships"
+        );
+        assert!(
+            agents.contains("Few-shot patterns"),
+            "AGENTS.md should include usage examples"
+        );
 
         let gi = fs::read_to_string(m.join(".gitignore")).expect("read .gitignore");
         assert!(gi.contains("db/"));

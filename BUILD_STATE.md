@@ -7,7 +7,7 @@ Agent working area. A fresh session reads this top to bottom, then follows
 
 - Latest shipped slice: Phase B / Slice B1, guidance plane across target harnesses.
   Added convention detection across target harnesses (`AGENTS.md`, `CLAUDE.md`, `.claude/settings.json`, `.agents/AGENTS.md`, `.codex/instructions.md`, `.opencode/AGENTS.md`, `.kilo/AGENTS.md`, `.cursor/rules/*.mdc`). Implemented comment stripping for JSON/JSONC and eager tool loading updates (`enableAllProjectMcpServers`, `enabledMcpjsonServers`) in Claude settings. Extended `mycelia connect` to Antigravity, OpenCode, and Kilo. Verified: fmt/clippy clean, 134 tests passed, release build.
-- Verified checkpoint: fmt, clippy, 134 tests, release build, live `mycelia stats` dogfood verification showing 30.5x token savings.
+- Verified checkpoint: fmt, clippy, 134 tests, release build, live `mycelia stats` dogfood verification showing 30.5x token savings. The B2 guidance corrective pass also passed focused template and MCP-list tests.
 - V2 vision LOCKED and reconciled (2026-06-27): three planes (index, guidance,
   connection) divided by one consent boundary, the project boundary itself.
   Canonical spine is `docs/concept/v2/00_vision.md` with `consent-boundary.svg`.
@@ -21,12 +21,17 @@ Agent working area. A fresh session reads this top to bottom, then follows
   defines the paired-run protocol, task set, metrics, decision rule, and the
   initial Codex kickoff observation. Full publish-or-shelf decision is still
   pending controlled paired runs, starting with Codex and Claude Code.
+  Current finding: first three task probes each called Mycelia once, so MCP
+  discoverability is present, but `.mycelia/AGENTS.md` is too weak to teach the
+  full MCP surface, tool choice, and few-shot usage.
   Verification plan:
   1. Record before/after token metrics and latency for sample exploration tasks.
   2. Document findings in project evaluation logs or docs.
   3. Before controlled runs, refresh the `mycelia` corpus because the kickoff
      dogfood query did not surface `ROADMAP.md` and `status` reported incomplete
      embeddings.
+  4. Strengthen generated project guidance before continuing paired runs, then
+     verify the template and MCP tool listing with focused tests.
 - Blockers: none.
 
 ## Decisions
@@ -92,6 +97,7 @@ Agent working area. A fresh session reads this top to bottom, then follows
   `--no-embed`, consent-gated guidance include, idempotent; 131 tests.
 - 2026-06-28: Phase B / Slice B1 — guidance plane across target harnesses shipped. Convention detection across AGENTS.md, CLAUDE.md, .claude/settings.json, .agents/AGENTS.md, .codex/instructions.md, .opencode/AGENTS.md, .kilo/AGENTS.md, .cursor/rules/*.mdc. Added JSON comment stripping and eager tool loading update for Claude settings. Extended connect to Antigravity, OpenCode, and Kilo; 134 tests.
 - 2026-06-28: Phase B / Slice B2 measurement protocol started in `docs/evaluations/phase_b2_interactive_measurement.md`; recorded initial Codex observation, kept the publish-or-shelf decision pending paired harness runs, and noted the named `mycelia` corpus needs refresh before controlled measurement.
+- 2026-06-28: Phase B / Slice B2 guidance corrective pass strengthened generated `.mycelia/AGENTS.md` with full MCP tool surface, tool-choice rules, and few-shot patterns; added focused assertions for generated guidance and `find_related` tool listing.
 
 ## Archive
 

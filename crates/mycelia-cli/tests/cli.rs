@@ -727,6 +727,7 @@ fn stdio_mcp_uses_named_corpus_and_calls_read_only_tools() {
         "search_codebase",
         "locate_implementation",
         "retrieve",
+        "find_related",
         "list_corpora",
     ] {
         assert!(
