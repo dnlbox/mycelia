@@ -5,9 +5,13 @@ Agent working area. A fresh session reads this top to bottom, then follows
 
 ## Now
 
-- Latest shipped slice: Phase B / Slice B1, guidance plane across target harnesses.
-  Added convention detection across target harnesses (`AGENTS.md`, `CLAUDE.md`, `.claude/settings.json`, `.agents/AGENTS.md`, `.codex/instructions.md`, `.opencode/AGENTS.md`, `.kilo/AGENTS.md`, `.cursor/rules/*.mdc`). Implemented comment stripping for JSON/JSONC and eager tool loading updates (`enableAllProjectMcpServers`, `enabledMcpjsonServers`) in Claude settings. Extended `mycelia connect` to Antigravity, OpenCode, and Kilo. Verified: fmt/clippy clean, 134 tests passed, release build.
-- Verified checkpoint: fmt, clippy, 134 tests, release build, live `mycelia stats` dogfood verification showing 30.5x token savings. The B2 guidance corrective pass also passed focused template and MCP-list tests.
+- Latest shipped slice: retrospective documentation.
+  Added `docs/retrospective/` with a junior-friendly journey summary, timeline,
+  lessons, and evidence notes sourced from local Codex sessions, Claude sessions,
+  git history, concept docs, and build state.
+- Verified checkpoint: Mycelia project-local DB status is healthy; Mycelia
+  `find`/`retrieve` were used for orientation; new retrospective docs contain no
+  em dash characters; docs-focused readback completed.
 - V2 vision LOCKED and reconciled (2026-06-27): three planes (index, guidance,
   connection) divided by one consent boundary, the project boundary itself.
   Canonical spine is `docs/concept/v2/00_vision.md` with `consent-boundary.svg`.
@@ -104,6 +108,7 @@ Agent working area. A fresh session reads this top to bottom, then follows
 - 2026-06-28: Phase B / Slice B2 measurement protocol started in `docs/evaluations/phase_b2_interactive_measurement.md`; recorded initial Codex observation, kept the publish-or-shelf decision pending paired harness runs, and noted the named `mycelia` corpus needs refresh before controlled measurement.
 - 2026-06-28: Phase B / Slice B2 guidance corrective pass strengthened generated `.mycelia/AGENTS.md` with full MCP tool surface, tool-choice rules, and few-shot patterns; added focused assertions for generated guidance and `find_related` tool listing.
 - 2026-06-28: Phase B / Slice B2 transcript audit found a Codex thread claiming Mycelia use while only issuing shell commands; updated the measurement rule and generated guidance so only visible Mycelia MCP tool calls count as use.
+- 2026-06-28: Added `docs/retrospective/` from local Codex and Claude session logs, git history, concept docs, and Mycelia dogfood checks; framed the journey around measured retrieval, CLI product shape, MCP adoption failure, and the v2 project-attached pivot.
 
 ## Archive
 
