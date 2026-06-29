@@ -15,9 +15,14 @@ pub(crate) fn evaluate(
     strategy: RetrievalStrategy,
 ) -> Result<EvaluationReport> {
     let corpus_root = store::corpus_root(database)?;
-    evaluate_cases(cases, limit, strategy, corpus_root.as_ref(), |query| {
-        crate::find_with_strategy(database, query, limit, strategy)
-    })
+    evaluate_cases(
+        database,
+        cases,
+        limit,
+        strategy,
+        corpus_root.as_ref(),
+        |query| crate::find_with_strategy(database, query, limit, strategy),
+    )
 }
 
 pub(crate) fn evaluate_with_embeddings(
@@ -28,9 +33,14 @@ pub(crate) fn evaluate_with_embeddings(
     provider: &mut dyn EmbeddingProvider,
 ) -> Result<EvaluationReport> {
     let corpus_root = store::corpus_root(database)?;
-    evaluate_cases(cases, limit, strategy, corpus_root.as_ref(), |query| {
-        crate::find_with_embeddings(database, query, limit, strategy, provider)
-    })
+    evaluate_cases(
+        database,
+        cases,
+        limit,
+        strategy,
+        corpus_root.as_ref(),
+        |query| crate::find_with_embeddings(database, query, limit, strategy, provider),
+    )
 }
 
 pub(crate) fn evaluate_baseline(
@@ -68,6 +78,7 @@ pub(crate) fn pair_reports(
 }
 
 fn evaluate_cases<F>(
+    database: &Path,
     cases: &[EvaluationCase],
     limit: usize,
     strategy: RetrievalStrategy,
@@ -93,13 +104,26 @@ where
             return Err(Error::EvaluationCaseWithoutExpected(case.name.clone()));
         }
 
-        let found = find(case.query.as_str())?;
-        let rank = first_relevant_rank(found.as_slice(), expected.as_slice());
-        if let Some(rank) = rank {
-            hits += 1;
-            reciprocal_rank_sum += 1.0 / rank as f64;
-            token_usage.add_answer(found.as_slice(), rank - 1, corpus_root);
-        }
+        let rank = if !case.changed_paths.is_empty() {
+            // Change-scoped retrieval: blast_radius instead of text find.
+            let headers = store::blast_radius(database, &case.changed_paths, limit)?;
+            let rank = first_relevant_header_rank(headers.as_slice(), expected.as_slice());
+            if let Some(rank) = rank {
+                hits += 1;
+                reciprocal_rank_sum += 1.0 / rank as f64;
+                token_usage.add_answer_headers(headers.as_slice(), corpus_root);
+            }
+            rank
+        } else {
+            let found = find(case.query.as_str())?;
+            let rank = first_relevant_rank(found.as_slice(), expected.as_slice());
+            if let Some(rank) = rank {
+                hits += 1;
+                reciprocal_rank_sum += 1.0 / rank as f64;
+                token_usage.add_answer(found.as_slice(), rank - 1, corpus_root);
+            }
+            rank
+        };
         results.push(EvaluationCaseResult {
             name: case.name.clone(),
             query: case.query.clone(),
@@ -384,6 +408,22 @@ fn first_relevant_rank(hits: &[SearchHit], expected: &[ExpectedMatch]) -> Option
         .map(|index| index + 1)
 }
 
+/// Rank check for `blast_radius` results (`SearchHeader` instead of `SearchHit`).
+/// `contains` text checks are skipped for headers (body text is not stored).
+fn first_relevant_header_rank(
+    headers: &[SearchHeader],
+    expected: &[ExpectedMatch],
+) -> Option<usize> {
+    headers
+        .iter()
+        .position(|h| {
+            expected
+                .iter()
+                .any(|target| h.source_path == target.source_path)
+        })
+        .map(|index| index + 1)
+}
+
 #[derive(Default)]
 struct TokenUsageAccumulator {
     answered_queries: usize,
@@ -415,6 +455,29 @@ impl TokenUsageAccumulator {
 
         if let (Some(root), Some(hit)) = (corpus_root, hits.get(relevant_index))
             && let Some(path) = resolve_under_root(root, hit.chunk.source_path.as_str())
+            && let Ok(bytes) = std::fs::read(path)
+        {
+            let tokens = estimated_tokens(bytes.len());
+            self.cold_source_tokens = Some(self.cold_source_tokens.unwrap_or(0) + tokens);
+        }
+    }
+
+    /// Accounts for a successful `blast_radius` (change-scoped) answer.
+    /// All returned headers are billed as header tokens; body retrieval is 0
+    /// (the agent receives the lean blast-radius headers and decides which
+    /// files to retrieve next, rather than reading a full body here).
+    fn add_answer_headers(&mut self, headers: &[SearchHeader], corpus_root: Option<&PathBuf>) {
+        let header_tokens = headers
+            .iter()
+            .map(|h| estimated_tokens(h.approximate_bytes()))
+            .sum::<usize>();
+        self.answered_queries += 1;
+        self.find_header_tokens += header_tokens;
+        // Cold-source: read the first changed-path file (score 1.0 headers come
+        // first in blast_radius output, ordered by source_path/line).
+        if let Some(first) = headers.first()
+            && let Some(root) = corpus_root
+            && let Some(path) = resolve_under_root(root, first.source_path.as_str())
             && let Ok(bytes) = std::fs::read(path)
         {
             let tokens = estimated_tokens(bytes.len());
@@ -491,6 +554,7 @@ mod tests {
             EvaluationCase {
                 name: "second result".to_owned(),
                 query: "needle".to_owned(),
+                changed_paths: Vec::new(),
                 required_files: Vec::new(),
                 expected: vec![ExpectedMatch {
                     source_path: "b.txt".to_owned(),
@@ -500,6 +564,7 @@ mod tests {
             EvaluationCase {
                 name: "miss".to_owned(),
                 query: "needle".to_owned(),
+                changed_paths: Vec::new(),
                 required_files: Vec::new(),
                 expected: vec![ExpectedMatch {
                     source_path: "missing.txt".to_owned(),
@@ -550,6 +615,7 @@ mod tests {
         let cases = vec![EvaluationCase {
             name: "invalid".to_owned(),
             query: "query".to_owned(),
+            changed_paths: Vec::new(),
             required_files: Vec::new(),
             expected: Vec::new(),
         }];
@@ -577,6 +643,7 @@ mod tests {
         let cases = vec![EvaluationCase {
             name: "fixed task".to_owned(),
             query: "token".to_owned(),
+            changed_paths: Vec::new(),
             required_files: vec!["target.rs".to_owned()],
             expected: Vec::new(),
         }];
@@ -607,6 +674,7 @@ mod tests {
         let cases = vec![EvaluationCase {
             name: "paired task".to_owned(),
             query: "paired_contract".to_owned(),
+            changed_paths: Vec::new(),
             required_files: vec!["target.rs".to_owned()],
             expected: Vec::new(),
         }];

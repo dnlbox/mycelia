@@ -277,6 +277,11 @@ pub struct ExpectedMatch {
 pub struct EvaluationCase {
     pub name: String,
     pub query: String,
+    /// Relative paths (from corpus root) changed in a PR or commit. When
+    /// non-empty, the eval runs `blast_radius` instead of a text `find`.
+    /// The `query` field is still used for the baseline's `grep_read`.
+    #[serde(default)]
+    pub changed_paths: Vec<String>,
     #[serde(default)]
     pub required_files: Vec<String>,
     #[serde(default)]

@@ -418,9 +418,11 @@ fn relationship_callees(connection: &Connection, symbol: &str) -> Result<Vec<Rel
 
 /// Returns headers for every chunk in `changed_paths` plus the callers and
 /// callees of every named symbol those paths define — the "blast radius" of a
-/// diff. Deduplicates by chunk id. Changed-path chunks score 1.0; callers /
-/// callees outside the changed set score 0.5. Sorted by source_path then
-/// line_start, capped at `limit`.
+/// diff. Deduplicates by chunk id. Callers / callees discovered via the calls
+/// graph score 1.0 (they are the new cross-file signal the agent needs to
+/// review). Changed-path chunks score 0.5 (the agent already has the diff and
+/// these provide structural context). Sorted by score desc then source_path
+/// and line_start, capped at `limit`.
 pub(crate) fn blast_radius(
     database: &Path,
     changed_paths: &[String],
@@ -431,7 +433,9 @@ pub(crate) fn blast_radius(
     }
     let connection = open_database(database, Access::ReadOnly)?;
 
-    // --- 1. Collect headers for chunks in the changed paths (score 1.0) ---
+    // --- 1. Collect headers for chunks in the changed paths (score 0.5) ---
+    // Changed-path chunks are already known from the diff; they score lower
+    // than callers/callees so cross-file impact appears first in the output.
     let mut by_id: BTreeMap<String, SearchHeader> = BTreeMap::new();
     for batch in changed_paths.chunks(500) {
         let placeholders = vec!["?"; batch.len()].join(", ");
@@ -447,7 +451,7 @@ pub(crate) fn blast_radius(
             let record = row?;
             by_id
                 .entry(record.id.clone())
-                .or_insert_with(|| SearchHeader::from_record(&record, 1.0));
+                .or_insert_with(|| SearchHeader::from_record(&record, 0.5));
         }
     }
 
@@ -469,12 +473,17 @@ pub(crate) fn blast_radius(
     symbols.dedup();
 
     // --- 3. Expand callers and callees for each changed symbol (score 0.5) ---
+    // Insert a caller/callee at score 1.0, but only when it is NOT already
+    // present as a changed-path chunk (score 0.5).  Changed-path chunks that
+    // happen to also call a changed symbol keep their score=0.5 — the agent
+    // already has them from the diff and upgrading them would crowd out the
+    // genuinely new cross-file callers.
     let insert_related = |by_id: &mut BTreeMap<String, SearchHeader>, hit: RelatedHit| {
         by_id
             .entry(hit.definition.chunk_id.clone())
             .or_insert_with(|| {
-                let mut h = hit.definition;
-                h.score = 0.5;
+                let mut h = hit.definition.clone();
+                h.score = 1.0;
                 h
             });
     };
@@ -487,11 +496,43 @@ pub(crate) fn blast_radius(
         }
     }
 
-    // --- 4. Sort by path then line, cap at limit ---
+    // --- 4. De-dup callers/callees to one chunk per unique source file ---
+    // For cross-file impact analysis the agent needs to know WHICH files to
+    // review, not every chunk within those files.  Collect the lowest-byte_start
+    // chunk from each caller/callee file so the caller group stays compact.
+    let changed_path_set: BTreeSet<&str> = changed_paths.iter().map(String::as_str).collect();
+    {
+        // For each caller/callee source_path (score 1.0, not in changed_paths)
+        // find the chunk with the lowest byte_start.
+        let mut best: BTreeMap<String, (usize, String)> = BTreeMap::new(); // path → (byte_start, id)
+        for (id, header) in &by_id {
+            if header.score >= 1.0 && !changed_path_set.contains(header.source_path.as_str()) {
+                let entry = best
+                    .entry(header.source_path.clone())
+                    .or_insert((usize::MAX, id.clone()));
+                if header.span.byte_start < entry.0 {
+                    *entry = (header.span.byte_start, id.clone());
+                }
+            }
+        }
+        let keep: BTreeSet<String> = best.into_values().map(|(_, id)| id).collect();
+        by_id.retain(|id, header| {
+            if header.score >= 1.0 && !changed_path_set.contains(header.source_path.as_str()) {
+                keep.contains(id)
+            } else {
+                true
+            }
+        });
+    }
+
+    // --- 5. Sort: callers/callees (score 1.0) first by source_path/line,
+    //    then changed-path chunks (score 0.5), capped at limit. ---
     let mut result: Vec<SearchHeader> = by_id.into_values().collect();
     result.sort_by(|a, b| {
-        a.source_path
-            .cmp(&b.source_path)
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.source_path.cmp(&b.source_path))
             .then(a.span.line_start.cmp(&b.span.line_start))
     });
     result.truncate(limit);
@@ -2763,7 +2804,8 @@ mod tests {
             caller_paths.contains(&"caller.rs"),
             "expected caller.rs in blast radius; got {caller_paths:?}"
         );
-        // Changed-path chunks score 1.0; blast-radius chunks score 0.5.
+        // Callers/callees in other files score 1.0 (cross-file signal).
+        // Changed-path chunks score 0.5 (already in the diff).
         let helper_score = result
             .iter()
             .find(|h| {
@@ -2774,13 +2816,13 @@ mod tests {
             })
             .map(|h| h.score)
             .expect("helper chunk");
-        assert_eq!(helper_score, 1.0, "changed-path chunk must score 1.0");
+        assert_eq!(helper_score, 0.5, "changed-path chunk must score 0.5");
         let caller_score = result
             .iter()
             .find(|h| h.source_path == "caller.rs")
             .map(|h| h.score)
             .expect("caller chunk");
-        assert_eq!(caller_score, 0.5, "blast-radius chunk must score 0.5");
+        assert_eq!(caller_score, 1.0, "blast-radius caller must score 1.0");
     }
 
     #[test]

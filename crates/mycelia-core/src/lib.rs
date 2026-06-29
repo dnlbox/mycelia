@@ -183,9 +183,9 @@ pub fn find_relationships(
 
 /// Returns headers for every chunk in `changed_paths` plus the callers and
 /// callees of every named symbol those paths define — the blast radius of a
-/// diff or PR. Deduplicates by chunk id; changed-path chunks score 1.0,
-/// callers/callees score 0.5. Sorted by source_path then line, capped at
-/// `limit`.
+/// diff or PR. Deduplicates by chunk id. Callers/callees score 1.0 (new
+/// cross-file signal); changed-path chunks score 0.5 (already in the diff).
+/// Sorted by score desc then source_path/line, capped at `limit`.
 pub fn blast_radius(
     database: &Path,
     changed_paths: &[String],

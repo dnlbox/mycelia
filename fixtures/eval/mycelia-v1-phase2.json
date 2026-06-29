@@ -1,0 +1,35 @@
+{
+  "limit": 20,
+  "cases": [
+    {
+      "name": "extraction entrypoint — callers in store",
+      "query": "extract_text source_hash extractor chunks text call edges typescript",
+      "changed_paths": ["crates/mycelia-core/src/extract.rs"],
+      "required_files": ["crates/mycelia-core/src/store.rs"]
+    },
+    {
+      "name": "blast_radius API — delegation in lib",
+      "query": "blast_radius changed_paths headers limit callers callees deduplication",
+      "changed_paths": ["crates/mycelia-core/src/store.rs"],
+      "required_files": ["crates/mycelia-core/src/lib.rs"]
+    },
+    {
+      "name": "discovery entrypoint — callers in store and evaluation",
+      "query": "discover root files corpus paths source_root gitignore",
+      "changed_paths": ["crates/mycelia-core/src/discovery.rs"],
+      "required_files": ["crates/mycelia-core/src/store.rs"]
+    },
+    {
+      "name": "lib public API — consumed by CLI main",
+      "query": "mycelia_core blast_radius find_headers evaluate_with_strategy public API",
+      "changed_paths": ["crates/mycelia-core/src/lib.rs"],
+      "required_files": ["crates/mycelia-cli/src/main.rs"]
+    },
+    {
+      "name": "evaluation pair_reports — caller in lib",
+      "query": "pair_reports mycelia baseline comparison paired evaluation report",
+      "changed_paths": ["crates/mycelia-core/src/evaluation.rs"],
+      "required_files": ["crates/mycelia-core/src/lib.rs"]
+    }
+  ]
+}
