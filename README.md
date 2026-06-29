@@ -1,246 +1,94 @@
-# mycelia
+# Mycelia
 
-`mycelia` is a local, content-agnostic knowledge index written in Rust. It is
-built for corpora that are too large or too connected to keep in a context window:
-codebases, notes, protocol docs, discovery files, and eventually cross-corpus
-research.
+> Code indexer for CI and agentic workflows, fully compatible with the Vercel AI SDK ecosystem.
 
-The thesis is simple: consult a sourced index instead of re-reading files.
-`find` returns cheap, ranked headers; `retrieve` returns the exact body only after
-the caller commits to a chunk. The project is local-first, precision-first, and
-licensed as FOSS under Apache-2.0.
+Mycelia indexes a codebase with tree-sitter, materialises a deterministic index from a single commit, and serves precise, change-scoped code context to an agent you wrote — running headless in CI. It is the retrieval layer your agent calls, not the agent itself.
 
-## Current status
+## What it is / what it is not
 
-The shipped baseline includes:
+**It is:**
+- A retrieval primitive: `find` (ranked headers) + `retrieve` (one fresh chunk)
+- A read-only MCP server, consumable from any AI SDK 7.0 `createMCPClient` call
+- A per-commit, deterministic, cache-friendly index, reproducible at a SHA
+- CI-native: ephemeral builds, lexical-only path, no model download required
 
-- deterministic discovery over ignored local files
-- range-addressed UTF-8 chunks with byte ranges and one-based line ranges
-- SQLite persistence with content-hash freshness
-- tree-sitter chunking for Rust, TypeScript, TSX, Python, and Ruby
-- reranked FTS5, vector, hybrid, and routed retrieval strategies
-- local FastEmbed embeddings using `BAAI/bge-small-en-v1.5`
-- named corpus profiles with derived local database paths
-- manifest-driven retrieval evaluation with token-per-answer estimates
-- a read-only multi-corpus stdio MCP server exposing `find`, aliases,
-  `retrieve`, `find_related`, and `list_corpora`
-- a deterministic depth-1 Rust `calls` graph: `graph` CLI command and
-  `find_related` MCP tool, with conservative query-time name resolution
-- query-time freshness validation plus MCP self-heal for drifted sources
-- journey commands: `setup`, `connect`, `stats`, `status`, `refresh`, `list`,
-  and `delete`
-- per-corpus activity logs with token-savings estimates for `find`
+**It is not:**
+- A PR reviewer, coding agent, or chatbot
+- A desktop IDE assistant or persistent watcher-synced knowledge graph
+- A document or prose indexer (code only)
+- A replacement for the agent you write
 
-The current Forge gate is 68 cases across baseline, expanded, and paraphrase
-queries. Recent measured results on the refreshed local Forge corpus:
+## Usage
 
-| Strategy | Hits | Tokens per answer |
-| --- | ---: | ---: |
-| `fts5-reranked` | 48 / 68 | 1395.9 |
-| `routed` | 50 / 68 | 1391.9 |
+### 1. In CI (GitHub Actions)
 
-The latest repairs exclude evaluation manifests from corpus discovery, collapse
-exact duplicate chunk bodies in limited ranked headers, and add a conservative
-Rust `calls` graph. `BUILD_STATE.md` records the remaining misses and gate
-caveats.
-
-`routed` is the CLI default and the MCP default when embeddings are available. It
-falls back to reranked FTS5 when a corpus has no embeddings or the cached model is
-unavailable. The provider-less synchronous core API remains lexical by default.
-
-## Install
-
-Target install, after Homebrew/core acceptance:
-
-```text
-brew install mycelia
+```yaml
+- uses: actions/checkout@v4
+- uses: actions/cache@v4
+  with:
+    path: .mycelia/
+    key: mycelia-${{ runner.os }}-${{ github.sha }}
+    restore-keys: mycelia-${{ runner.os }}-
+- run: mycelia ci prepare        # build/restore index at this SHA, emit cache key + env
+- run: node review-agent.mjs     # your AI SDK agent queries the index
 ```
 
-Homebrew staging path for testing the same user experience before submitting to
-Homebrew/core:
+See [docs/vision.md](docs/vision.md) for the full CI narrative and rationale.
 
-```text
-brew tap dnlbox/mycelia
-brew install mycelia
+### 2. From a Vercel AI SDK 7.0 agent
+
+```ts
+import { ToolLoopAgent, stepCountIs } from 'ai';
+import { createMCPClient } from '@ai-sdk/mcp';
+
+const mycelia = await createMCPClient({
+  transport: { type: 'stdio', command: 'mycelia', args: ['serve'] },
+});
+const agent = new ToolLoopAgent({
+  model: 'anthropic/claude-sonnet-4-5',   // via AI Gateway
+  tools: await mycelia.tools(),
+  stopWhen: stepCountIs(15),
+});
+const { text } = await agent.generate({ prompt: 'Review this PR using mycelia for context.' });
 ```
 
-The tap repository should be `github.com/dnlbox/homebrew-mycelia`, with
-`packaging/homebrew/Formula/mycelia.rb` copied to `Formula/mycelia.rb`.
+See [docs/vision.md](docs/vision.md) for the full AI SDK narrative and the optional `@mycelia/ai-sdk` typed wrapper (Phase 3).
 
-Quick install with Cargo, no clone needed:
+## Status today
 
-```text
-cargo install --force mycelia-cli --git https://github.com/dnlbox/mycelia.git --tag v0.1.4 --locked
-```
+**Working now:**
+- Tree-sitter structural chunking for Rust, TypeScript, TSX, Python, Ruby; plain-text fallback for everything else
+- Deterministic chunk IDs (BLAKE3) and extractor versioning, reproducible at any SHA (R3, R4)
+- Freshness-validated retrieval: fresh chunk, live whole file on drift, or `unavailable` (R2)
+- Read-only MCP server (stdio) with six tools: `find`, `search_codebase`, `locate_implementation`, `retrieve`, `find_related`, `list_corpora` (R5)
+- Rust `calls` graph: free-function, path, and macro call edges, with conservative query-time resolution
+- Optional embeddings (BAAI/bge-small-en-v1.5 via FastEmbed/ONNX); lexical-only path works without them (R6)
 
-Curl installer, useful when you want one command and do not want to remember the
-Cargo syntax:
+**In progress per the roadmap:**
+- `mycelia ci prepare` + artifact export/import/verify with manifest (Phase 1, R7/R8)
+- Git-diff-aware incremental refresh (Phase 1)
+- Change-scoped retrieval; TypeScript and Python `calls` graph (Phase 2)
+- Reference `review-agent.mjs` + GitHub Actions workflow; optional `@mycelia/ai-sdk` wrapper (Phase 3)
 
-```text
-curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.4/install.sh | sh
-```
+See [ROADMAP.md](ROADMAP.md) for phases, gates, and sequencing.
 
-The script installs the tagged CLI with Cargo into `${MYCELIA_INSTALL_ROOT:-$HOME/.local}`.
-Override the version with `MYCELIA_REF`, for example:
+## Build & test
 
-```text
-curl -fsSL https://raw.githubusercontent.com/dnlbox/mycelia/v0.1.4/install.sh | MYCELIA_REF=v0.1.4 sh
-```
-
-From a checkout, for development:
-
-```text
+```sh
+# Install CLI to ~/.local/bin
 cargo install --force --path crates/mycelia-cli --root "$HOME/.local"
+
+# Full validation
+cargo test --workspace --all-features
 ```
 
-The Homebrew formula builds from a tagged source archive with
-`--no-default-features --features semantic-system-ort`, depends on
-`onnxruntime`, and avoids ORT binary downloads during the formula build. The
-embedding model is still downloaded only by `setup` or `embed`, never by
-install, `find`, `serve`, or `connect`.
+Per-slice protocol (before every merge):
+`cargo fmt --check` → `cargo clippy -D warnings` → `cargo test --workspace --all-features` → release build → CLI smoke → eval manifest run → MCP smoke → record stats. No broken tree between slices.
 
-The repo's validation commands expect Cargo from the stable Rust toolchain path:
+## Docs map
 
-```text
-env PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH" cargo test --workspace --all-features
-```
-
-## Named corpus flow
-
-Register a corpus once:
-
-```text
-cd ~/forge
-~/.local/bin/mycelia setup
-~/.local/bin/mycelia connect codex
-~/.local/bin/mycelia status
-~/.local/bin/mycelia stats
-```
-
-`setup` registers the corpus, indexes it, and embeds it with visible progress.
-From inside a registered repository, most journey commands infer the matching
-corpus from the current directory. Explicit `--corpus <name>` remains available.
-`serve` is the harness-launched MCP command, not the normal user journey.
-
-Profiles store only a canonical root:
-
-```text
-${XDG_CONFIG_HOME:-~/.config}/mycelia/corpora/<name>.json
-```
-
-Databases are derived from the profile name:
-
-```text
-${XDG_DATA_HOME:-~/.local/share}/mycelia/corpora/<name>.sqlite3
-```
-
-`MYCELIA_CONFIG_HOME` and `MYCELIA_DATA_HOME` override those homes for isolated
-tests and development.
-
-## Explicit path flow
-
-Explicit paths remain available for fixtures, diagnostics, and automation:
-
-```text
-mycelia index <root> --database <path>
-mycelia embed --database <path>
-mycelia find <query> --database <path> [--strategy substring|fts5|fts5-reranked|vector|hybrid|routed]
-mycelia retrieve <chunk_id> --database <path>
-mycelia graph <symbol> --database <path> [--direction callers|callees]
-mycelia eval <manifest> --database <path> [--strategy substring|fts5|fts5-reranked|vector|hybrid|routed]
-mycelia serve --database <path> [--lexical]
-```
-
-A command accepts either a named corpus or explicit paths, never both.
-
-## MCP surface
-
-`serve` runs a read-only MCP server over stdio for local AI clients. In normal
-named-corpus mode it is a single multi-corpus server: each request resolves the
-corpus from an explicit `corpus` argument, the launch working directory, the
-`--corpus` fallback default, or the sole registered corpus. Explicit
-`--database` remains available for fixture and diagnostic servers. The MCP tools
-are:
-
-- `find`: ranked, sourced headers under a bounded result budget
-- `search_codebase`: alias for `find`
-- `locate_implementation`: alias for `find`
-- `retrieve`: one selected chunk body by namespaced `corpus:hash` `chunk_id`
-- `find_related`: callers or callees of a code symbol over the `calls` graph
-- `list_corpora`: registered corpus names and roots for disambiguation
-
-`find` does not return chunk bodies. A header includes path, byte range, line
-range, score, extractor, `source_hash`, `chunk_id`, and a signature or synopsis.
-`retrieve` re-reads the source file before returning a body. If the source changed,
-it returns the whole current file live so the caller gets real, up-to-date code.
-If the source vanished, escaped the corpus root, or cannot be verified as text, it
-returns a structured `unavailable` signal. The MCP server also self-heals the
-resolved corpus index for touched drifted files, so later `find` results converge
-back to fresh headers.
-
-In stdio mode, stdout is reserved for MCP protocol messages. Diagnostics go to
-stderr. The server is intentionally read-only: indexing, ignore changes, mutation
-tools, watchers, and arbitrary database selection are not exposed to the model.
-
-## Retrieval model
-
-The retrieval stack is evidence-gated:
-
-- `substring` and raw `fts5` remain reference adapters.
-- `fts5-reranked` is the lexical baseline and the fallback path.
-- `vector` and `hybrid` remain selectable measured strategies.
-- `routed` classifies the query locally and chooses a lexical-first or
-  semantic-first profile.
-
-Embeddings are cached per chunk with model identity and dimensions. `embed`
-downloads the model on first use and then runs locally. Query and serve paths do
-not trigger implicit model downloads; they degrade to lexical retrieval instead.
-
-Evaluation changes must be judged on hit rate, MRR, and tokens per answered query.
-Hit-rate gains that cost more answer tokens are not wins for the core use case.
-
-## Prior art
-
-[Graphify](https://github.com/safishamsi/graphify) is serious prior art for local
-AST graphs and MCP-backed code navigation. The no-cost local bakeoff showed it is
-valuable, especially around exact symbols and graph-neighborhood questions, but
-it did not beat Mycelia on the current code-only structural gate.
-
-That does not make Graphify irrelevant. It is a useful reference for graph
-features, affected sets, and assistant integration. Mycelia stays separate because
-the target is broader: range-addressed heterogeneous chunks, token-efficient
-retrieval, explicit freshness guarantees, and eventual cross-corpus queries.
-
-## Roadmap
-
-Deferred work is tracked in `docs/concept/` and `BUILD_STATE.md`. The current
-ordering is:
-
-1. Refine and implement the v2 project-attached integration plan in
-   `docs/concept/v2/`: `.mycelia/` project metadata, cwd-discovered MCP, CI
-   prepare/seed flows, artifact/cache sharing, and consent-gated project
-   instruction integration.
-2. Ship concept `24` carry-forward items: `stats --all`, clearer zero-use
-   signals, visible harness guidance where it remains useful, and slice closeout
-   dogfood evidence.
-3. Improve retrieval quality on the remaining 68-case Forge misses, but only if
-   the token-per-answer gate holds.
-4. Add a debounced watcher as a latency optimization for keeping embeddings
-   current after query-time self-heal.
-5. Extend the typed-edge graph (`23`): edges for TypeScript, Python, and Ruby;
-   `imports`/`implements` edge types; method-call resolution via type
-   information; and traversal beyond depth-1.
-6. Add federation and specialized vector or storage layers only after local
-   measurements justify them.
-
-## License
-
-Apache-2.0. This is the right default for this project if it should be FOSS and
-usable by other agent tools, companies, and local workflows without copyleft
-obligations.
-
-The reason to prefer Apache-2.0 over MIT here is the explicit patent grant and
-patent termination. MIT is simpler, but it is weaker for a project that may grow
-into a shared indexing layer embedded in other tools. Strong copyleft licenses
-would force more reciprocal sharing, but they would also reduce adoption for a
-local CLI/library that should be easy to embed.
+- [docs/vision.md](docs/vision.md) — what Mycelia is, the two usage narratives, the three differentiators, what is out of scope
+- [docs/requirements.md](docs/requirements.md) — binding contract: R1-R11, engine constraints
+- [docs/architecture.md](docs/architecture.md) — what exists today vs. the v1 target, gap list
+- [docs/evaluation.md](docs/evaluation.md) — how every go/no-go gate is measured
+- [ROADMAP.md](ROADMAP.md) — phase sequence, per-phase gates, definition of done
