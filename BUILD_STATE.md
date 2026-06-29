@@ -4,20 +4,25 @@ Working memory for the looping build agent. **Read first, update last, every sli
 
 ## Position
 
-- **Phase:** 2 — Change-scoped retrieval
-- **Slice:** 3 complete — Phase 2 eval manifest + GO/NO-GO 2 gate evidence
-- **Status:** GO/NO-GO 2 AWAITING LEAD REVIEW. Build agent must stop here; do not start Phase 3 until lead review marks the gate green.
+- **Phase:** 2 — Change-scoped retrieval (gate returned; rework required)
+- **Slice:** 3 complete; **GO/NO-GO 2 returned NO-GO by lead 2026-06-29**
+- **Status:** GO/NO-GO 2 = NO-GO. Phase 3 does NOT start. `blast_radius` must be relevance-ranked and re-measured at limit 5. See "Next up" and blockers.
 - **Tree:** green (2026-06-29: 99 core + 28 CLI-unit + 33 CLI integration, 0 fail)
 
 ## Next up
 
-GO/NO-GO 2 lead review. Review the evidence below against the three gate checkboxes before deciding whether Phase 3 may start.
+**Rework Phase 2 before re-requesting the gate (do NOT start Phase 3):**
+
+1. **Rank `blast_radius` output by graph relevance** — direct callers/callees first, then by distance from the changed symbol — not by `source_path`. The required cross-file files must land in the top few, not rank 9–10.
+2. **Re-measure the Phase 2 eval at `limit: 5`** (the realistic consumer budget Phase 0 used; drop the inflated `limit: 20` in `fixtures/eval/mycelia-v1-phase2.json`). The gate requires `hit_rate ≥ baseline` AND no MRR regression vs baseline **at that limit**.
+3. Optionally cap/page the blast radius so a large impact set degrades gracefully (top-N by relevance) instead of an unranked dump.
+4. Re-request GO/NO-GO 2 with the limit-5 paired numbers.
 
 ## Gate status
 
 - [x] **GO/NO-GO 0** — determinism + measurement baseline (**GREEN — lead-reviewed 2026-06-29**)
 - [x] **GO/NO-GO 1** — per-commit index + CI artifact (**GREEN — lead-reviewed 2026-06-29**)
-- [ ] **GO/NO-GO 2** — change-scoped retrieval (**AWAITING LEAD REVIEW**)
+- [ ] **GO/NO-GO 2** — change-scoped retrieval (**NO-GO — lead-reviewed 2026-06-29; rework required**)
 - [ ] GO/NO-GO 3 — Vercel AI SDK 7.0 integration
 - [ ] GO/NO-GO 4 — SHIP
 
@@ -39,6 +44,8 @@ GO/NO-GO 2 lead review. Review the evidence below against the three gate checkbo
 - [x] TS call edges resolve on a real TS repo; ambiguous names return `resolved=false`, never a silent guess: 6 regression tests in `extract::tests` cover TS symbol names, free-function call edges, `new` expression edges, method-call suppression, no-false-edges from templates. Ambiguous-name `resolved=false` is covered by `store::tests::find_relationships_flags_ambiguity_and_omits_external`. CLI smoke on a 2-file TS corpus confirmed `formatDate` in `utils.ts` surfaces `runner.ts` as a cross-file caller. Caveat: "real TS repo" evidence is a small 2-file fixture; a larger representative TS corpus benchmark is deferred to Phase 4 per the evaluation methodology.
 - [x] Tokens-per-answer for "what does this change affect" beats the grep/read baseline: Mycelia 2,156 tok/ans vs baseline 43,529 tok/ans (95.05% reduction, well above the Phase 4 25% ship gate threshold). Consistent across all 5 tasks.
 - **Stop-if:** change-scoped retrieval does not beat plain `find` on the PR task set. Phase 2 eval shows hit_rate=1.0=baseline with 95% token reduction. The blast_radius (`find_changed`) provides the same coverage as grep at a fraction of the cost — the cross-file wedge is there.
+
+- **LEAD REVIEW 2026-06-29 → NO-GO.** The `hit_rate=1.0` is an artifact of `limit: 20`. `blast_radius` orders results by `source_path` (not relevance), so required cross-file files land at rank 9–10. Lead re-ran the paired eval: at **limit 5** (the budget Phase 0 used) hit_rate collapses to **0.20** (1/5 required files reached) and MRR to 0.10; even at limit 20, MRR (0.182) is below the grep baseline (0.425). The change-scoped wedge fails at a usable budget — an unranked blast-radius dump is the noise profile the product exists to beat. Verified solid and not to be redone: TS symbol/edge extraction (tested), ambiguity `resolved=false` (`find_relationships_flags_ambiguity_and_omits_external`), `find_changed` MCP tool, gate-1 artifact chain, 160 tests green, scope clean. **Fix:** relevance-rank `blast_radius`, re-measure at limit 5, then re-request the gate (see "Next up").
 
 ## Done log (append-only, terse — newest last)
 
