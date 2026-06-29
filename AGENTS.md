@@ -7,6 +7,7 @@ Mycelia is a code indexer for CI and agentic workflows. It materialises a determ
 **Workspace:** two crates. `crates/mycelia-core` (synchronous, no async) handles indexing, storage, retrieval, and the calls graph. `crates/mycelia-cli` is the async edge: CLI commands and MCP server. Never let Tokio or async types leak into `mycelia-core`.
 
 **Engine constraints (binding — from [docs/requirements.md](docs/requirements.md)):**
+
 - No async in core. Async lives at the CLI/server edge only.
 - Narrow traits over broad ones.
 - Brute-force vector similarity until measured as the bottleneck. No speculative ANN index.
@@ -27,6 +28,7 @@ Mycelia is a code indexer for CI and agentic workflows. It materialises a determ
 > Target **Vercel AI SDK 7.0** (released 2026-06-25) ONLY.
 >
 > Disregard any bundled plugin skill (e.g. the `vercel:ai-sdk` skill, v0.44.0) that teaches `ai@6.x` patterns. The correct 7.0 API is:
+>
 > - `inputSchema` (not `parameters`) for tool definitions
 > - `import { createMCPClient } from '@ai-sdk/mcp'` (not `experimental_createMCPClient` from `ai`)
 > - `ToolLoopAgent` / `WorkflowAgent`
@@ -54,11 +56,13 @@ Every slice lands the tree GREEN, in this order, before moving on:
 No broken tree between slices. Parallelise within a slice, never across slices. Give each writer a disjoint file area. Never delegate decisions, protocol edits, or final integration.
 
 **Install CLI for smoke tests:**
+
 ```sh
 cargo install --force --path crates/mycelia-cli --root "$HOME/.local"
 ```
 
 **Full validation:**
+
 ```sh
 cargo test --workspace --all-features
 ```
@@ -68,6 +72,12 @@ cargo test --workspace --all-features
 Each phase in [ROADMAP.md](ROADMAP.md) carries a go/no-go gate. Do not start a phase until the prior gate is GREEN. Gates are measured per the methodology in [docs/evaluation.md](docs/evaluation.md): hit rate + MRR + tokens-per-answered-query, paired A/B, minimum five tasks. A hit-rate gain that increases tokens-per-answer is not a win.
 
 The ship gate (Phase 4) requires: 25% token reduction vs the no-Mycelia baseline, no correctness regression, and measurable false-positive improvement, across at least five paired tasks.
+
+**Gates are the team lead's call, not the build agent's.** A build agent works through the slices within a phase, then **stops at the gate**, records the evidence against each checkbox in [BUILD_STATE.md](BUILD_STATE.md), and hands off for review. It never self-certifies a gate or starts the next phase on its own.
+
+## Build loop
+
+The repo is built in a slice-by-slice loop driven by [prompt.md](prompt.md), with [BUILD_STATE.md](BUILD_STATE.md) as cross-iteration memory. Every iteration: read the state, take the next unchecked roadmap item, implement one slice, run the per-slice protocol, update the state, commit. Stop at each go/no-go gate for lead review. This is the only sanctioned way to advance the roadmap.
 
 ## Operational constraints
 
@@ -89,3 +99,5 @@ The ship gate (Phase 4) requires: 25% token reduction vs the no-Mycelia baseline
 - [docs/architecture.md](docs/architecture.md) — current engine reality and target architecture
 - [docs/evaluation.md](docs/evaluation.md) — measurement methodology and decision rules
 - [ROADMAP.md](ROADMAP.md) — phase sequence and go/no-go gates
+- [prompt.md](prompt.md) — the build-loop kickstart (hand this to the build agent)
+- [BUILD_STATE.md](BUILD_STATE.md) — cross-iteration build state; read first, update last

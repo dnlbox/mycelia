@@ -7,12 +7,14 @@ Mycelia indexes a codebase with tree-sitter, materialises a deterministic index 
 ## What it is / what it is not
 
 **It is:**
+
 - A retrieval primitive: `find` (ranked headers) + `retrieve` (one fresh chunk)
 - A read-only MCP server, consumable from any AI SDK 7.0 `createMCPClient` call
 - A per-commit, deterministic, cache-friendly index, reproducible at a SHA
 - CI-native: ephemeral builds, lexical-only path, no model download required
 
 **It is not:**
+
 - A PR reviewer, coding agent, or chatbot
 - A desktop IDE assistant or persistent watcher-synced knowledge graph
 - A document or prose indexer (code only)
@@ -29,8 +31,8 @@ Mycelia indexes a codebase with tree-sitter, materialises a deterministic index 
     path: .mycelia/
     key: mycelia-${{ runner.os }}-${{ github.sha }}
     restore-keys: mycelia-${{ runner.os }}-
-- run: mycelia ci prepare        # build/restore index at this SHA, emit cache key + env
-- run: node review-agent.mjs     # your AI SDK agent queries the index
+- run: mycelia ci prepare # build/restore index at this SHA, emit cache key + env
+- run: node review-agent.mjs # your AI SDK agent queries the index
 ```
 
 See [docs/vision.md](docs/vision.md) for the full CI narrative and rationale.
@@ -38,18 +40,22 @@ See [docs/vision.md](docs/vision.md) for the full CI narrative and rationale.
 ### 2. From a Vercel AI SDK 7.0 agent
 
 ```ts
-import { ToolLoopAgent, stepCountIs } from 'ai';
-import { createMCPClient } from '@ai-sdk/mcp';
+import { ToolLoopAgent, stepCountIs } from "ai";
+import { createMCPClient } from "@ai-sdk/mcp";
 
 const mycelia = await createMCPClient({
-  transport: { type: 'stdio', command: 'mycelia', args: ['serve'] },
+  transport: { type: "stdio", command: "mycelia", args: ["serve"] },
 });
+
 const agent = new ToolLoopAgent({
-  model: 'anthropic/claude-sonnet-4-5',   // via AI Gateway
+  model: "anthropic/claude-sonnet-4-5", // via AI Gateway
   tools: await mycelia.tools(),
   stopWhen: stepCountIs(15),
 });
-const { text } = await agent.generate({ prompt: 'Review this PR using mycelia for context.' });
+
+const { text } = await agent.generate({
+  prompt: "Review this PR using mycelia for context.",
+});
 ```
 
 See [docs/vision.md](docs/vision.md) for the full AI SDK narrative and the optional `@mycelia/ai-sdk` typed wrapper (Phase 3).
@@ -57,6 +63,7 @@ See [docs/vision.md](docs/vision.md) for the full AI SDK narrative and the optio
 ## Status today
 
 **Working now:**
+
 - Tree-sitter structural chunking for Rust, TypeScript, TSX, Python, Ruby; plain-text fallback for everything else
 - Deterministic chunk IDs (BLAKE3) and extractor versioning, reproducible at any SHA (R3, R4)
 - Freshness-validated retrieval: fresh chunk, live whole file on drift, or `unavailable` (R2)
@@ -65,6 +72,7 @@ See [docs/vision.md](docs/vision.md) for the full AI SDK narrative and the optio
 - Optional embeddings (BAAI/bge-small-en-v1.5 via FastEmbed/ONNX); lexical-only path works without them (R6)
 
 **In progress per the roadmap:**
+
 - `mycelia ci prepare` + artifact export/import/verify with manifest (Phase 1, R7/R8)
 - Git-diff-aware incremental refresh (Phase 1)
 - Change-scoped retrieval; TypeScript and Python `calls` graph (Phase 2)
