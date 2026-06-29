@@ -45,6 +45,30 @@ pub(crate) fn discover(root: &Path) -> Result<Discovery> {
     Ok(Discovery { files, rejected })
 }
 
+pub(crate) fn source_root_hash(root: &Path) -> Result<String> {
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|_| Error::InvalidRoot(root.to_path_buf()))?;
+    let discovery = discover(canonical_root.as_path())?;
+    let mut hasher = blake3::Hasher::new();
+
+    for path in discovery.files {
+        let relative = path
+            .strip_prefix(canonical_root.as_path())
+            .map_err(|_| Error::PathOutsideRoot(path.clone()))?;
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        let bytes = std::fs::read(&path).map_err(|source| Error::io(&path, source))?;
+        let file_hash = blake3::hash(bytes.as_slice());
+
+        hasher.update(relative.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(file_hash.as_bytes());
+        hasher.update(b"\n");
+    }
+
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
 fn is_evaluation_manifest(path: &Path) -> bool {
     if path.extension().and_then(|value| value.to_str()) != Some("json") {
         return false;
@@ -139,5 +163,25 @@ mod tests {
             discover(&missing),
             Err(Error::InvalidRoot(path)) if path == missing
         ));
+    }
+
+    #[test]
+    fn source_root_hash_tracks_sources_but_not_internal_state() {
+        let directory = tempdir().expect("temp directory");
+        fs::write(directory.path().join("a.txt"), "a").expect("write a");
+        fs::create_dir_all(directory.path().join(".mycelia/db")).expect("create mycelia state");
+        fs::write(directory.path().join(".mycelia/db/index.sqlite3"), "one")
+            .expect("write internal db");
+
+        let first = source_root_hash(directory.path()).expect("first hash");
+
+        fs::write(directory.path().join(".mycelia/db/index.sqlite3"), "two")
+            .expect("update internal db");
+        let second = source_root_hash(directory.path()).expect("second hash");
+        assert_eq!(first, second);
+
+        fs::write(directory.path().join("a.txt"), "changed").expect("change source");
+        let third = source_root_hash(directory.path()).expect("third hash");
+        assert_ne!(first, third);
     }
 }

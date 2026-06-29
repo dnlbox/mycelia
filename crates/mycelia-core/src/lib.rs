@@ -60,6 +60,11 @@ pub fn extractor_versions() -> &'static [&'static str] {
     extract::EXTRACTOR_VERSIONS
 }
 
+/// Deterministic hash of the discoverable source tree.
+pub fn source_root_hash(root: &Path) -> Result<String> {
+    discovery::source_root_hash(root)
+}
+
 /// Forces a full re-index of a corpus, re-extracting even unchanged sources so a
 /// schema or extractor upgrade (such as the call graph) backfills. This is the
 /// re-index behind `mycelia refresh`.

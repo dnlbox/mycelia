@@ -35,7 +35,7 @@ _Foundation. Nothing else is trustworthy without this._
 _Differentiators #1 and #3 become real._
 
 - [x] Implement `mycelia ci prepare`: build-or-restore the index at the current commit, validate schema, emit the cache key (R8) and env for downstream steps.
-- [ ] Implement artifact `export` / `import` / `verify` with the manifest format (R7).
+- [x] Implement artifact `export` / `import` / `verify` with the manifest format (R7).
 - [ ] Implement git-diff-aware **incremental refresh** (restore previous artifact → update only changed files).
 
 **GO/NO-GO 1:**

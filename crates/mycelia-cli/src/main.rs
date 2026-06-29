@@ -271,6 +271,36 @@ enum CiCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Export the project-local index as a CI artifact directory.
+    Export {
+        /// Artifact directory to create or update.
+        artifact_dir: PathBuf,
+        /// Project root. Defaults to the git root of the current directory.
+        path: Option<PathBuf>,
+        /// Emit a machine-readable report.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify a CI artifact manifest against the current checkout.
+    Verify {
+        /// Artifact directory containing manifest.json and db files.
+        artifact_dir: PathBuf,
+        /// Project root. Defaults to the git root of the current directory.
+        path: Option<PathBuf>,
+        /// Emit a machine-readable report.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify and import a CI artifact into the project-local index.
+    Import {
+        /// Artifact directory containing manifest.json and db files.
+        artifact_dir: PathBuf,
+        /// Project root. Defaults to the git root of the current directory.
+        path: Option<PathBuf>,
+        /// Emit a machine-readable report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -289,6 +319,27 @@ struct CiPrepareReport {
     files_removed: usize,
     files_rejected: usize,
     github_env_written: Option<PathBuf>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ArtifactManifest {
+    mycelia_version: String,
+    schema_version: i64,
+    project_name: String,
+    git_commit: String,
+    source_root_hash: String,
+    extractors: Vec<String>,
+    embedding_model: Option<String>,
+    db_files: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct CiArtifactReport {
+    artifact_dir: PathBuf,
+    manifest: ArtifactManifest,
+    database: PathBuf,
+    db_files: Vec<String>,
+    status: String,
 }
 
 // Target resolution
@@ -586,6 +637,21 @@ where
                 embed,
                 json,
             } => cmd_ci_prepare(path, !embed || no_embed || lexical, json),
+            CiCommand::Export {
+                artifact_dir,
+                path,
+                json,
+            } => cmd_ci_export(artifact_dir, path, json),
+            CiCommand::Verify {
+                artifact_dir,
+                path,
+                json,
+            } => cmd_ci_verify(artifact_dir, path, json),
+            CiCommand::Import {
+                artifact_dir,
+                path,
+                json,
+            } => cmd_ci_import(artifact_dir, path, json),
         },
 
         Command::Find {
@@ -784,6 +850,332 @@ fn cmd_ci_prepare(path: Option<PathBuf>, lexical: bool, json: bool) -> Result<()
         format_ci_prepare_report(&report)
     });
     Ok(())
+}
+
+fn cmd_ci_export(artifact_dir: PathBuf, path: Option<PathBuf>, json: bool) -> Result<()> {
+    let root = resolve_git_root(path)?;
+    let database = root.join(".mycelia").join("db").join("index.sqlite3");
+    let manifest = build_artifact_manifest(&root, &database)?;
+    let artifact_dir = prepare_artifact_dir(&artifact_dir)?;
+    let artifact_db_dir = artifact_dir.join("db");
+    fs::create_dir_all(&artifact_db_dir)
+        .map_err(|e| format!("failed to create {}: {e}", artifact_db_dir.display()))?;
+
+    for db_file in &manifest.db_files {
+        let source = root.join(".mycelia").join(db_file);
+        let destination = artifact_dir.join(db_file);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
+        }
+        fs::copy(&source, &destination).map_err(|e| {
+            format!(
+                "failed to copy {} to {}: {e}",
+                source.display(),
+                destination.display()
+            )
+        })?;
+    }
+
+    let manifest_path = artifact_dir.join("manifest.json");
+    let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    fs::write(&manifest_path, manifest_json)
+        .map_err(|e| format!("failed to write {}: {e}", manifest_path.display()))?;
+
+    emit_artifact_report(artifact_dir, database, manifest, "exported", json)
+}
+
+fn cmd_ci_verify(artifact_dir: PathBuf, path: Option<PathBuf>, json: bool) -> Result<()> {
+    let root = resolve_git_root(path)?;
+    let artifact_dir = artifact_dir
+        .canonicalize()
+        .map_err(|e| format!("invalid artifact dir {}: {e}", artifact_dir.display()))?;
+    let manifest = verify_artifact_for_root(&artifact_dir, &root)?;
+    let database = root.join(".mycelia").join("db").join("index.sqlite3");
+    emit_artifact_report(artifact_dir, database, manifest, "verified", json)
+}
+
+fn cmd_ci_import(artifact_dir: PathBuf, path: Option<PathBuf>, json: bool) -> Result<()> {
+    let root = resolve_git_root(path)?;
+    let artifact_dir = artifact_dir
+        .canonicalize()
+        .map_err(|e| format!("invalid artifact dir {}: {e}", artifact_dir.display()))?;
+    let manifest = verify_artifact_for_root(&artifact_dir, &root)?;
+    let project_name = project_name_for_root(&root)?;
+    project::init_project(&root, &project_name)?;
+
+    let db_dir = root.join(".mycelia").join("db");
+    fs::create_dir_all(&db_dir)
+        .map_err(|e| format!("failed to create {}: {e}", db_dir.display()))?;
+    for db_file in &manifest.db_files {
+        let source = artifact_dir.join(db_file);
+        let destination = root.join(".mycelia").join(db_file);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
+        }
+        fs::copy(&source, &destination).map_err(|e| {
+            format!(
+                "failed to copy {} to {}: {e}",
+                source.display(),
+                destination.display()
+            )
+        })?;
+    }
+
+    let database = root.join(".mycelia").join("db").join("index.sqlite3");
+    let _ = mycelia_core::corpus_status(&database).map_err(|e| e.to_string())?;
+    emit_artifact_report(artifact_dir, database, manifest, "imported", json)
+}
+
+fn build_artifact_manifest(root: &Path, database: &Path) -> Result<ArtifactManifest> {
+    if !database.is_file() {
+        return Err(format!(
+            "project-local database not found: {}; run `mycelia ci prepare` first",
+            database.display()
+        ));
+    }
+    let status = mycelia_core::corpus_status(database).map_err(|e| e.to_string())?;
+    Ok(ArtifactManifest {
+        mycelia_version: env!("CARGO_PKG_VERSION").to_string(),
+        schema_version: mycelia_core::schema_version(),
+        project_name: project_name_for_root(root)?,
+        git_commit: git_output(root, ["rev-parse", "HEAD"])?,
+        source_root_hash: mycelia_core::source_root_hash(root).map_err(|e| e.to_string())?,
+        extractors: extractor_versions(),
+        embedding_model: status.embedding_model,
+        db_files: db_files_for_database(database)?,
+    })
+}
+
+fn verify_artifact_for_root(artifact_dir: &Path, root: &Path) -> Result<ArtifactManifest> {
+    let manifest_path = artifact_dir.join("manifest.json");
+    let contents = fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("failed to read {}: {e}", manifest_path.display()))?;
+    let manifest: ArtifactManifest =
+        serde_json::from_str(&contents).map_err(|e| format!("invalid artifact manifest: {e}"))?;
+
+    verify_field(
+        "mycelia_version",
+        env!("CARGO_PKG_VERSION"),
+        manifest.mycelia_version.as_str(),
+    )?;
+    verify_i64_field(
+        "schema_version",
+        mycelia_core::schema_version(),
+        manifest.schema_version,
+    )?;
+    verify_field(
+        "project_name",
+        project_name_for_root(root)?.as_str(),
+        manifest.project_name.as_str(),
+    )?;
+    verify_field(
+        "git_commit",
+        git_output(root, ["rev-parse", "HEAD"])?.as_str(),
+        manifest.git_commit.as_str(),
+    )?;
+    verify_field(
+        "source_root_hash",
+        mycelia_core::source_root_hash(root)
+            .map_err(|e| e.to_string())?
+            .as_str(),
+        manifest.source_root_hash.as_str(),
+    )?;
+    verify_vec_field(
+        "extractors",
+        extractor_versions().as_slice(),
+        manifest.extractors.as_slice(),
+    )?;
+    verify_db_files(artifact_dir, manifest.db_files.as_slice())?;
+
+    let artifact_database = artifact_dir.join("db").join("index.sqlite3");
+    let status = mycelia_core::corpus_status(&artifact_database).map_err(|e| {
+        format!(
+            "artifact mismatch: db_files database could not be opened ({}): {e}",
+            artifact_database.display()
+        )
+    })?;
+    let artifact_root = mycelia_core::corpus_root(&artifact_database)
+        .map_err(|e| format!("artifact mismatch: corpus_root could not be read: {e}"))?
+        .ok_or_else(|| "artifact mismatch: corpus_root missing".to_string())?;
+    let current_root = root
+        .canonicalize()
+        .map_err(|e| format!("invalid project root {}: {e}", root.display()))?;
+    verify_field(
+        "corpus_root",
+        current_root.to_string_lossy().as_ref(),
+        artifact_root.to_string_lossy().as_ref(),
+    )?;
+    verify_option_field(
+        "embedding_model",
+        manifest.embedding_model.as_deref(),
+        status.embedding_model.as_deref(),
+    )?;
+
+    Ok(manifest)
+}
+
+fn prepare_artifact_dir(path: &Path) -> Result<PathBuf> {
+    if path.exists() && !path.is_dir() {
+        return Err(format!(
+            "artifact path is not a directory: {}",
+            path.display()
+        ));
+    }
+    fs::create_dir_all(path).map_err(|e| format!("failed to create {}: {e}", path.display()))?;
+    path.canonicalize()
+        .map_err(|e| format!("invalid artifact dir {}: {e}", path.display()))
+}
+
+fn emit_artifact_report(
+    artifact_dir: PathBuf,
+    database: PathBuf,
+    manifest: ArtifactManifest,
+    status: &str,
+    json: bool,
+) -> Result<()> {
+    let db_files = manifest.db_files.clone();
+    let report = CiArtifactReport {
+        artifact_dir,
+        manifest,
+        database,
+        db_files,
+        status: status.to_string(),
+    };
+    emit_output(if json {
+        serde_json::to_string(&report).map_err(|e| e.to_string())?
+    } else {
+        format_ci_artifact_report(&report)
+    });
+    Ok(())
+}
+
+fn format_ci_artifact_report(report: &CiArtifactReport) -> String {
+    format!(
+        "status: {status}\n\
+         artifact_dir: {artifact_dir}\n\
+         database: {database}\n\
+         git_commit: {git_commit}\n\
+         source_root_hash: {source_root_hash}\n\
+         db_files: {db_files}",
+        status = report.status,
+        artifact_dir = report.artifact_dir.display(),
+        database = report.database.display(),
+        git_commit = report.manifest.git_commit,
+        source_root_hash = report.manifest.source_root_hash,
+        db_files = report.db_files.join(",")
+    )
+}
+
+fn project_name_for_root(root: &Path) -> Result<String> {
+    if let Some(result) = project::resolve_from_cwd(root) {
+        return Ok(result?.name);
+    }
+    root.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+        .ok_or_else(|| "cannot derive project name from path".to_string())
+}
+
+fn extractor_versions() -> Vec<String> {
+    mycelia_core::extractor_versions()
+        .iter()
+        .map(|version| (*version).to_string())
+        .collect()
+}
+
+fn db_files_for_database(database: &Path) -> Result<Vec<String>> {
+    let db_dir = database
+        .parent()
+        .ok_or_else(|| format!("database path has no parent: {}", database.display()))?;
+    let file_name = database
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("database path is not valid UTF-8: {}", database.display()))?;
+    let mut files = Vec::new();
+    for name in [
+        file_name.to_string(),
+        format!("{file_name}-wal"),
+        format!("{file_name}-shm"),
+    ] {
+        let path = db_dir.join(&name);
+        if path.exists() {
+            files.push(format!("db/{name}"));
+        }
+    }
+    if files.iter().all(|file| file != "db/index.sqlite3") {
+        return Err("artifact mismatch: db_files missing db/index.sqlite3".to_string());
+    }
+    Ok(files)
+}
+
+fn verify_db_files(artifact_dir: &Path, db_files: &[String]) -> Result<()> {
+    if db_files.is_empty() {
+        return Err("artifact mismatch: db_files is empty".to_string());
+    }
+    if db_files.iter().all(|file| file != "db/index.sqlite3") {
+        return Err("artifact mismatch: db_files missing db/index.sqlite3".to_string());
+    }
+    for file in db_files {
+        let path = Path::new(file);
+        if path.is_absolute()
+            || path
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err(format!("artifact mismatch: db_files unsafe entry {file}"));
+        }
+        let full_path = artifact_dir.join(path);
+        if !full_path.is_file() {
+            return Err(format!("artifact mismatch: db_files missing file {file}"));
+        }
+    }
+    Ok(())
+}
+
+fn verify_field(field: &str, expected: &str, found: &str) -> Result<()> {
+    if expected == found {
+        Ok(())
+    } else {
+        Err(format!(
+            "artifact mismatch: {field} expected {expected}, found {found}"
+        ))
+    }
+}
+
+fn verify_i64_field(field: &str, expected: i64, found: i64) -> Result<()> {
+    if expected == found {
+        Ok(())
+    } else {
+        Err(format!(
+            "artifact mismatch: {field} expected {expected}, found {found}"
+        ))
+    }
+}
+
+fn verify_vec_field(field: &str, expected: &[String], found: &[String]) -> Result<()> {
+    if expected == found {
+        Ok(())
+    } else {
+        Err(format!(
+            "artifact mismatch: {field} expected {}, found {}",
+            expected.join(","),
+            found.join(",")
+        ))
+    }
+}
+
+fn verify_option_field(field: &str, expected: Option<&str>, found: Option<&str>) -> Result<()> {
+    if expected == found {
+        Ok(())
+    } else {
+        Err(format!(
+            "artifact mismatch: {field} expected {}, found {}",
+            expected.unwrap_or("<none>"),
+            found.unwrap_or("<none>")
+        ))
+    }
 }
 
 fn resolve_git_root(path: Option<PathBuf>) -> Result<PathBuf> {

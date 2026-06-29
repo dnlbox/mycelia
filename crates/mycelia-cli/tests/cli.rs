@@ -318,6 +318,118 @@ fn ci_prepare_cache_key_is_stable_until_project_config_changes() {
 }
 
 #[test]
+fn ci_artifact_export_verify_import_round_trips_project_index() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path().join("corpus");
+    fs::create_dir_all(root.join("src")).expect("src dir");
+    init_committed_git(&root);
+    write_file(
+        &root.join("src/lib.rs"),
+        "pub fn artifact_round_trip_symbol() -> &'static str { \"artifact\" }\n",
+    );
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-m", "initial"]);
+
+    run_success(&["ci", "prepare", "--json", root.to_str().expect("root")]);
+    let artifact_dir = temp.path().join("artifact");
+    let exported: Value = serde_json::from_str(&run_success(&[
+        "ci",
+        "export",
+        artifact_dir.to_str().expect("artifact"),
+        root.to_str().expect("root"),
+        "--json",
+    ]))
+    .expect("export report");
+    assert_eq!(exported["status"], "exported");
+    assert_eq!(exported["manifest"]["project_name"], "corpus");
+    assert_eq!(exported["manifest"]["schema_version"], 5);
+    assert_eq!(
+        exported["manifest"]["db_files"][0],
+        serde_json::Value::String("db/index.sqlite3".to_string())
+    );
+    assert!(artifact_dir.join("manifest.json").is_file());
+    assert!(artifact_dir.join("db/index.sqlite3").is_file());
+
+    let verified: Value = serde_json::from_str(&run_success(&[
+        "ci",
+        "verify",
+        artifact_dir.to_str().expect("artifact"),
+        root.to_str().expect("root"),
+        "--json",
+    ]))
+    .expect("verify report");
+    assert_eq!(verified["status"], "verified");
+
+    let database = root.join(".mycelia/db/index.sqlite3");
+    fs::remove_file(&database).expect("remove project db");
+    let imported: Value = serde_json::from_str(&run_success(&[
+        "ci",
+        "import",
+        artifact_dir.to_str().expect("artifact"),
+        root.to_str().expect("root"),
+        "--json",
+    ]))
+    .expect("import report");
+    assert_eq!(imported["status"], "imported");
+    assert!(database.is_file(), "database was not restored");
+
+    let find = run_success(&[
+        "find",
+        "artifact_round_trip_symbol",
+        "--database",
+        database.to_str().expect("database"),
+        "--json",
+    ]);
+    let hits: Value = serde_json::from_str(&find).expect("find json");
+    assert_eq!(hits.as_array().expect("hits").len(), 1);
+}
+
+#[test]
+fn ci_artifact_verify_rejects_named_manifest_mismatch() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path().join("corpus");
+    fs::create_dir_all(&root).expect("root dir");
+    init_committed_git(&root);
+    write_file(&root.join("main.rs"), "fn mismatch_fixture() {}\n");
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-m", "initial"]);
+
+    run_success(&["ci", "prepare", "--json", root.to_str().expect("root")]);
+    let artifact_dir = temp.path().join("artifact");
+    run_success(&[
+        "ci",
+        "export",
+        artifact_dir.to_str().expect("artifact"),
+        root.to_str().expect("root"),
+        "--json",
+    ]);
+
+    let manifest_path = artifact_dir.join("manifest.json");
+    let mut manifest: Value =
+        serde_json::from_str(&fs::read_to_string(&manifest_path).expect("manifest"))
+            .expect("manifest json");
+    manifest["git_commit"] = Value::String("not-the-current-commit".to_string());
+    fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).expect("manifest text"),
+    )
+    .expect("write tampered manifest");
+
+    let output = run(&[
+        "ci",
+        "verify",
+        artifact_dir.to_str().expect("artifact"),
+        root.to_str().expect("root"),
+    ]);
+    assert!(!output.status.success(), "tampered manifest should fail");
+    let stderr = String::from_utf8(output.stderr).expect("stderr");
+    assert!(
+        stderr.contains("artifact mismatch: git_commit"),
+        "missing named mismatch:\n{stderr}"
+    );
+}
+
+#[test]
 fn setup_no_embed_supports_default_find_without_model_cache() {
     let temp = TempDir::new().expect("tempdir");
     let root = temp.path().join("corpus");

@@ -5,13 +5,13 @@ Working memory for the looping build agent. **Read first, update last, every sli
 ## Position
 
 - **Phase:** 1 — Per-commit index + CI artifact
-- **Slice:** 1 complete — `mycelia ci prepare`
-- **Status:** Phase 1 in progress. `ci prepare` implemented; next item is artifact export/import/verify.
+- **Slice:** 2 complete — artifact export/import/verify
+- **Status:** Phase 1 in progress. `ci prepare` and artifact export/import/verify implemented; next item is git-diff-aware incremental refresh.
 - **Tree:** green (2026-06-29: fmt, clippy, tests, release build, install, CLI smoke, paired eval run, MCP smoke, stats)
 
 ## Next up
 
-Phase 1, second item: implement artifact `export` / `import` / `verify` with the manifest format (R7). See [ROADMAP.md](ROADMAP.md) Phase 1 and requirements R7 / R8.
+Phase 1, third item: implement git-diff-aware incremental refresh (restore previous artifact → update only changed files). See [ROADMAP.md](ROADMAP.md) Phase 1 and requirements R8 / R10.
 
 ## Gate status
 
@@ -35,6 +35,7 @@ Phase 1, second item: implement artifact `export` / `import` / `verify` with the
 - 2026-06-29 — Phase 0 / Slice 3: added full-index deterministic chunk-id regression coverage and explicit `setup --no-embed` default-find regression coverage. Validation: fmt ok; clippy ok; workspace tests ok; release build ok; install ok; release smoke ok: chunk-id sets identical across two independent indexes, lexical default find returned 1 hit with no model cache, paired eval emitted all gate metrics, MCP smoke ok, stats ok. Stopped at GO/NO-GO 0 for lead review.
 - 2026-06-29 — **LEAD REVIEW → GO/NO-GO 0 = GREEN.** Independently verified: full suite green (89 core + 54 CLI tests, 0 fail); determinism test passes; scope clean (no Phase-1 leakage); R11 in-corpus-manifest guard confirmed enforced at runtime. Reproduced `eval --paired` twice (byte-identical): Mycelia 5/5 hits, MRR 0.8, 1219.8 tok/ans vs baseline 4/5, 29445.2 tok/ans; token-reduction ratio 0.9586. Cleared to start Phase 1.
 - 2026-06-29 — Phase 1 / Slice 1: implemented `mycelia ci prepare` with project-local `.mycelia/db/index.sqlite3`, real `HEAD` binding, schema validation, R8 cache-key composition (`mycelia_version`, schema version, extractor-version hash, project-config hash, git commit), GitHub env emission, lexical-only CI by default (`--embed` opt-in), JSON/text reports, and regression tests for lexical indexing, env output, stable cache keys, and config-hash invalidation. Also excluded `.mycelia/` internal state from corpus discovery after smoke caught generated files being indexed. Validation: fmt ok; clippy ok; workspace tests ok (89 core + 28 CLI-unit + 28 CLI integration, 0 fail); release build ok; install ok; isolated default `ci prepare` smoke indexed 1 source file and returned a header-only `find` hit; paired eval smoke hit rate 1.0 / MRR 1.0 / 118.0 tokens per answer; MCP stdio smoke initialized, listed 6 tools, called `find`, and exited cleanly; stats recorded 1 tiny-corpus query.
+- 2026-06-29 — Phase 1 / Slice 2: implemented same-checkout CI artifact `export` / `verify` / `import` with `manifest.json`, copied SQLite db files, required R7 fields (`mycelia_version`, `schema_version`, `project_name`, `git_commit`, `source_root_hash`, `extractors`, `embedding_model`, `db_files`), named mismatch errors, source-root hashing through the same discovery rules as indexing, and a corpus-root guard so imports cannot install an artifact whose stored root would break freshness. Validation: fmt ok; clippy ok; workspace tests ok (90 core + 28 CLI-unit + 30 CLI integration, 0 fail); release build ok; install ok; isolated smoke prepared, exported, verified, deleted db, imported, and found the restored symbol; paired eval smoke hit rate 1.0 / MRR 1.0 / 120.0 tokens per answer; MCP stdio smoke initialized, listed 6 tools, called `find`, and exited cleanly; stats recorded 1 tiny-corpus query.
 
 ## Decisions
 
@@ -46,6 +47,7 @@ Phase 1, second item: implement artifact `export` / `import` / `verify` with the
 - `ci prepare` requires a real Git `HEAD`; fake `.git` directories remain acceptable for legacy local setup tests, but CI cache evidence must bind to an actual commit.
 - `.mycelia/` is internal state and is excluded from discovery. Generated guidance, config, logs, caches, artifacts, and SQLite files must not contaminate the indexed corpus.
 - Phase 1 Slice 1 converts the R6 proxy into direct evidence for default `ci prepare` lexical mode plus `--no-embed` / `--lexical`; broader R8 gate evidence still waits on artifact import/export and incremental refresh.
+- Artifact import is intentionally same-checkout for now: `verify` rejects a database whose stored `corpus_root` differs from the current checkout root. Cross-path artifact rebinding is not part of this slice and would need explicit core support because freshness and retrieve use the stored root.
 
 ## Blockers / questions for the lead
 
