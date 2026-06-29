@@ -277,6 +277,9 @@ pub struct ExpectedMatch {
 pub struct EvaluationCase {
     pub name: String,
     pub query: String,
+    #[serde(default)]
+    pub required_files: Vec<String>,
+    #[serde(default)]
     pub expected: Vec<ExpectedMatch>,
 }
 
@@ -284,6 +287,7 @@ pub struct EvaluationCase {
 pub struct EvaluationCaseResult {
     pub name: String,
     pub query: String,
+    pub required_files: Vec<String>,
     pub rank: Option<usize>,
 }
 

@@ -14,6 +14,22 @@ A hit-rate gain that increases tokens-per-answer is **not a win**. The point of 
 - Each task names the specific file(s) a correct answer must reach.
 - Success is measured by whether those files were reached — not by output prose.
 - For PR-review tasks, the task also declares the expected true findings (for false-positive / recall scoring).
+- The v1 eval manifest schema uses `required_files` for that contract:
+
+```json
+{
+  "limit": 5,
+  "cases": [
+    {
+      "name": "core default find entrypoint",
+      "query": "pub fn find_with_strategy database query RetrievalStrategy",
+      "required_files": ["crates/mycelia-core/src/lib.rs"]
+    }
+  ]
+}
+```
+
+- Eval manifests must live outside the corpus under test when `mycelia eval` runs. Fixture manifests under `fixtures/eval/` are excluded from discovery, but a measurement run should copy or reference the manifest from outside the indexed root.
 
 ## Paired A/B, never single observations
 - Compare Mycelia vs baseline (grep/read, or reviewer-alone) on the **same** prompt, repo, and time budget.

@@ -11,7 +11,7 @@ use mycelia_core::{
 };
 use serde::Deserialize;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -437,6 +437,58 @@ struct EvaluationManifest {
     cases: Vec<EvaluationCase>,
 }
 
+fn validate_evaluation_manifest(
+    manifest: &EvaluationManifest,
+    manifest_path: &Path,
+    resolved: &ResolvedCorpus,
+) -> Result<()> {
+    let corpus_root = match &resolved.corpus_root {
+        Some(root) => Some(root.clone()),
+        None => mycelia_core::corpus_root(&resolved.database).map_err(|e| e.to_string())?,
+    };
+
+    if let Some(root) = corpus_root {
+        let canonical_root = root
+            .canonicalize()
+            .map_err(|e| format!("invalid corpus root {}: {e}", root.display()))?;
+        let canonical_manifest = manifest_path.canonicalize().map_err(|e| {
+            format!(
+                "invalid evaluation manifest {}: {e}",
+                manifest_path.display()
+            )
+        })?;
+        if canonical_manifest.starts_with(&canonical_root) {
+            return Err(format!(
+                "evaluation manifest must live outside the indexed corpus ({} is under {})",
+                canonical_manifest.display(),
+                canonical_root.display()
+            ));
+        }
+    }
+
+    for case in &manifest.cases {
+        for path in &case.required_files {
+            if !is_safe_relative_source_path(path) {
+                return Err(format!(
+                    "evaluation case '{}' has an invalid required_files entry: {path}",
+                    case.name
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn is_safe_relative_source_path(path: &str) -> bool {
+    let path = Path::new(path);
+    if path.as_os_str().is_empty() {
+        return false;
+    }
+    path.components()
+        .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
+}
+
 pub fn run() -> Result<()> {
     run_from(std::env::args_os())
 }
@@ -538,10 +590,12 @@ where
             json,
         } => {
             let resolved = target.resolve()?;
-            let contents = fs::read_to_string(&manifest)
-                .map_err(|e| format!("failed to read {}: {e}", manifest.display()))?;
+            let manifest_path = manifest;
+            let contents = fs::read_to_string(&manifest_path)
+                .map_err(|e| format!("failed to read {}: {e}", manifest_path.display()))?;
             let manifest: EvaluationManifest = serde_json::from_str(&contents)
                 .map_err(|e| format!("invalid evaluation manifest: {e}"))?;
+            validate_evaluation_manifest(&manifest, &manifest_path, &resolved)?;
             let report = eval_with_strategy(
                 &resolved.database,
                 &manifest.cases,

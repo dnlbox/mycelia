@@ -154,7 +154,8 @@ impl MyceliaServer {
             } => {
                 let available = profile::list().map_err(ResolveFailure::Message)?;
                 if let Some(name) = corpus {
-                    if let Some(profile) = available.into_iter().find(|profile| profile.name == name)
+                    if let Some(profile) =
+                        available.into_iter().find(|profile| profile.name == name)
                     {
                         return Ok(resolved_profile(profile));
                     }
@@ -406,9 +407,8 @@ impl MyceliaServer {
 
         let outcome = match mycelia_core::retrieve(&resolved.database, raw_chunk_id)
             .map_err(|error| error.to_string())
-            .and_then(|found| {
-                found.ok_or_else(|| format!("chunk not found: {}", request.chunk_id))
-            }) {
+            .and_then(|found| found.ok_or_else(|| format!("chunk not found: {}", request.chunk_id)))
+        {
             Ok(outcome) => outcome,
             Err(error) => {
                 if let Some(logger) = self.logger_for(&resolved) {
@@ -471,21 +471,18 @@ impl MyceliaServer {
                 return resolve_failure_json(self, error);
             }
         };
-        let hits = match mycelia_core::find_relationships(
-            &resolved.database,
-            &request.symbol,
-            direction,
-        )
-        .map_err(|error| error.to_string())
-        {
-            Ok(hits) => hits,
-            Err(error) => {
-                if let Some(logger) = self.logger_for(&resolved) {
-                    logger.log_error("find_related", &detail, &error);
+        let hits =
+            match mycelia_core::find_relationships(&resolved.database, &request.symbol, direction)
+                .map_err(|error| error.to_string())
+            {
+                Ok(hits) => hits,
+                Err(error) => {
+                    if let Some(logger) = self.logger_for(&resolved) {
+                        logger.log_error("find_related", &detail, &error);
+                    }
+                    return Err(error);
                 }
-                return Err(error);
-            }
-        };
+            };
         if let Some(logger) = self.logger_for(&resolved) {
             logger.log_find_related(&request.symbol, direction.as_str(), hits.len());
         }
@@ -668,7 +665,10 @@ fn trim_header_object(object: &mut serde_json::Map<String, serde_json::Value>) {
     if object.contains_key("signature") {
         object.remove("synopsis");
     }
-    if let Some(span) = object.get_mut("span").and_then(|value| value.as_object_mut()) {
+    if let Some(span) = object
+        .get_mut("span")
+        .and_then(|value| value.as_object_mut())
+    {
         span.remove("byte_start");
         span.remove("byte_end");
     }
@@ -913,8 +913,14 @@ mod tests {
         // The trimmed model-facing payload keeps line ranges and the chunk id but
         // drops internal provenance (source_hash, byte offsets).
         assert!(headers[0]["span"]["line_start"].is_number());
-        assert!(headers[0]["source_hash"].is_null(), "source_hash is trimmed");
-        assert!(headers[0]["span"]["byte_start"].is_null(), "byte offsets are trimmed");
+        assert!(
+            headers[0]["source_hash"].is_null(),
+            "source_hash is trimmed"
+        );
+        assert!(
+            headers[0]["span"]["byte_start"].is_null(),
+            "byte offsets are trimmed"
+        );
         // Self-heal is still provable through the core API hash, which retains it.
         let healed_hash = mycelia_core::find(&database, "needle", 5).expect("find")[0]
             .chunk

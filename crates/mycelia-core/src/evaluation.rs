@@ -52,12 +52,13 @@ where
     let mut token_usage = TokenUsageAccumulator::default();
 
     for case in cases {
-        if case.expected.is_empty() {
+        let expected = expected_matches(case);
+        if expected.is_empty() {
             return Err(Error::EvaluationCaseWithoutExpected(case.name.clone()));
         }
 
         let found = find(case.query.as_str())?;
-        let rank = first_relevant_rank(found.as_slice(), case.expected.as_slice());
+        let rank = first_relevant_rank(found.as_slice(), expected.as_slice());
         if let Some(rank) = rank {
             hits += 1;
             reciprocal_rank_sum += 1.0 / rank as f64;
@@ -66,6 +67,7 @@ where
         results.push(EvaluationCaseResult {
             name: case.name.clone(),
             query: case.query.clone(),
+            required_files: required_file_paths(case),
             rank,
         });
     }
@@ -91,6 +93,36 @@ where
         token_usage: token_usage.finish(),
         results,
     })
+}
+
+fn expected_matches(case: &EvaluationCase) -> Vec<ExpectedMatch> {
+    if !case.required_files.is_empty() {
+        return case
+            .required_files
+            .iter()
+            .cloned()
+            .map(|source_path| ExpectedMatch {
+                source_path,
+                contains: None,
+            })
+            .collect();
+    }
+
+    case.expected.clone()
+}
+
+fn required_file_paths(case: &EvaluationCase) -> Vec<String> {
+    if !case.required_files.is_empty() {
+        return case.required_files.clone();
+    }
+
+    let mut paths = Vec::new();
+    for expected in &case.expected {
+        if !paths.contains(&expected.source_path) {
+            paths.push(expected.source_path.clone());
+        }
+    }
+    paths
 }
 
 fn first_relevant_rank(hits: &[SearchHit], expected: &[ExpectedMatch]) -> Option<usize> {
@@ -214,6 +246,7 @@ mod tests {
             EvaluationCase {
                 name: "second result".to_owned(),
                 query: "needle".to_owned(),
+                required_files: Vec::new(),
                 expected: vec![ExpectedMatch {
                     source_path: "b.txt".to_owned(),
                     contains: None,
@@ -222,6 +255,7 @@ mod tests {
             EvaluationCase {
                 name: "miss".to_owned(),
                 query: "needle".to_owned(),
+                required_files: Vec::new(),
                 expected: vec![ExpectedMatch {
                     source_path: "missing.txt".to_owned(),
                     contains: None,
@@ -239,6 +273,7 @@ mod tests {
 
         assert_eq!(report.hits, 1);
         assert_eq!(report.results[0].rank, Some(2));
+        assert_eq!(report.results[0].required_files, vec!["b.txt"]);
         assert_eq!(report.results[1].rank, None);
         assert!((report.hit_rate - 0.5).abs() < f64::EPSILON);
         assert!((report.mean_reciprocal_rank - 0.25).abs() < f64::EPSILON);
@@ -270,6 +305,7 @@ mod tests {
         let cases = vec![EvaluationCase {
             name: "invalid".to_owned(),
             query: "query".to_owned(),
+            required_files: Vec::new(),
             expected: Vec::new(),
         }];
 
@@ -282,6 +318,35 @@ mod tests {
             ),
             Err(Error::EvaluationCaseWithoutExpected(name)) if name == "invalid"
         ));
+    }
+
+    #[test]
+    fn required_files_define_relevance_without_text_fragments() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("corpus");
+        let database = temp.path().join("index.sqlite3");
+        fs::create_dir_all(&root).expect("create corpus");
+        fs::write(root.join("target.rs"), "pub fn token() {}\n").expect("write target");
+        crate::index_corpus(root.as_path(), database.as_path()).expect("index");
+
+        let cases = vec![EvaluationCase {
+            name: "fixed task".to_owned(),
+            query: "token".to_owned(),
+            required_files: vec!["target.rs".to_owned()],
+            expected: Vec::new(),
+        }];
+
+        let report = evaluate(
+            database.as_path(),
+            cases.as_slice(),
+            1,
+            RetrievalStrategy::Fts5Reranked,
+        )
+        .expect("evaluate");
+
+        assert_eq!(report.hits, 1);
+        assert_eq!(report.results[0].required_files, vec!["target.rs"]);
+        assert_eq!(report.results[0].rank, Some(1));
     }
 
     #[test]

@@ -207,6 +207,11 @@ pub fn corpus_status(database: &Path) -> Result<CorpusStatusReport> {
     store::corpus_db_stats(database)
 }
 
+/// Returns the canonical corpus root recorded in an index, if present.
+pub fn corpus_root(database: &Path) -> Result<Option<std::path::PathBuf>> {
+    store::corpus_root(database)
+}
+
 fn bounded_header_limit(limit: usize) -> Result<usize> {
     if limit == 0 {
         return Err(Error::InvalidLimit);

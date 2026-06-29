@@ -1,0 +1,30 @@
+{
+  "limit": 5,
+  "cases": [
+    {
+      "name": "core default find entrypoint",
+      "query": "pub fn find_with_strategy database query RetrievalStrategy",
+      "required_files": ["crates/mycelia-core/src/lib.rs"]
+    },
+    {
+      "name": "deterministic chunk identifier",
+      "query": "chunk_id source_path source_hash byte_start byte_end blake3",
+      "required_files": ["crates/mycelia-core/src/extract.rs"]
+    },
+    {
+      "name": "fresh retrieve status outcome",
+      "query": "Retrieved Ok File Unavailable stale slice",
+      "required_files": ["crates/mycelia-core/src/model.rs"]
+    },
+    {
+      "name": "sqlite migration runner",
+      "query": "apply_migrations user_version LATEST_SCHEMA_VERSION",
+      "required_files": ["crates/mycelia-core/src/store.rs"]
+    },
+    {
+      "name": "stdio mcp find tool",
+      "query": "runs retrieval for one resolved corpus and projects to headers",
+      "required_files": ["crates/mycelia-cli/src/mcp.rs"]
+    }
+  ]
+}

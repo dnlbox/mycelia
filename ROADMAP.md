@@ -17,9 +17,9 @@ Every slice lands the tree GREEN, in this order, before moving on:
 
 _Foundation. Nothing else is trustworthy without this._
 
-- Stand up the eval harness: a **fixed task set** where each task declares the file(s) a correct answer requires (per [docs/evaluation.md](docs/evaluation.md)).
-- Wire the three-metric report: hit-rate + MRR + tokens-per-answered-query, paired A/B (Mycelia vs grep/read baseline).
-- Verify the lexical-only path (R6) and deterministic IDs (R3).
+- [x] Stand up the eval harness: a **fixed task set** where each task declares the file(s) a correct answer requires (per [docs/evaluation.md](docs/evaluation.md)).
+- [ ] Wire the three-metric report: hit-rate + MRR + tokens-per-answered-query, paired A/B (Mycelia vs grep/read baseline).
+- [ ] Verify the lexical-only path (R6) and deterministic IDs (R3).
 
 **GO/NO-GO 0:**
 

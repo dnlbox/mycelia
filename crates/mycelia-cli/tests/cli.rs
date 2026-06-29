@@ -389,6 +389,95 @@ fn evaluates_manifest_against_existing_index() {
     assert_eq!(report["hit_rate"], 1.0);
     assert_eq!(report["mean_reciprocal_rank"], 1.0);
     assert_eq!(report["results"][0]["rank"], 1);
+    assert_eq!(report["results"][0]["required_files"][0], "notes.txt");
+}
+
+#[test]
+fn eval_accepts_v1_required_files_schema() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path().join("corpus");
+    let database = temp.path().join("mycelia.sqlite");
+    let manifest = temp.path().join("evaluation.json");
+    fs::create_dir_all(&root).expect("create corpus");
+    write_file(&root.join("src.rs"), "pub fn fixed_task_contract() {}\n");
+    write_file(
+        &manifest,
+        r#"{
+          "limit": 5,
+          "cases": [{
+            "name": "fixed task contract",
+            "query": "fixed_task_contract",
+            "required_files": ["src.rs"]
+          }]
+        }"#,
+    );
+
+    run_success(&[
+        "index",
+        root.to_str().expect("root path"),
+        "--database",
+        database.to_str().expect("database path"),
+    ]);
+    let output = run_success(&[
+        "eval",
+        manifest.to_str().expect("manifest path"),
+        "--database",
+        database.to_str().expect("database path"),
+        "--strategy",
+        "fts5-reranked",
+        "--json",
+    ]);
+    let report: Value = serde_json::from_str(&output).expect("parse evaluation report");
+
+    assert_eq!(report["cases"], 1);
+    assert_eq!(report["hits"], 1);
+    assert_eq!(report["results"][0]["required_files"][0], "src.rs");
+}
+
+#[test]
+fn eval_rejects_manifest_inside_indexed_corpus() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path().join("corpus");
+    let database = temp.path().join("mycelia.sqlite");
+    let manifest = root.join("manifest.json");
+    fs::create_dir_all(&root).expect("create corpus");
+    write_file(&root.join("src.rs"), "pub fn fixed_task_contract() {}\n");
+    write_file(
+        &manifest,
+        r#"{
+          "limit": 5,
+          "cases": [{
+            "name": "fixed task contract",
+            "query": "fixed_task_contract",
+            "required_files": ["src.rs"]
+          }]
+        }"#,
+    );
+
+    run_success(&[
+        "index",
+        root.to_str().expect("root path"),
+        "--database",
+        database.to_str().expect("database path"),
+    ]);
+    let output = run(&[
+        "eval",
+        manifest.to_str().expect("manifest path"),
+        "--database",
+        database.to_str().expect("database path"),
+        "--strategy",
+        "fts5-reranked",
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "in-corpus manifest should be rejected"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(
+        stderr.contains("evaluation manifest must live outside the indexed corpus"),
+        "unexpected stderr:\n{stderr}"
+    );
 }
 
 #[test]
