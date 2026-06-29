@@ -4,21 +4,21 @@ Working memory for the looping build agent. **Read first, update last, every sli
 
 ## Position
 
-- **Phase:** 3 — Vercel AI SDK 7.0 integration
-- **Slice:** Phase 3 required integration artifacts complete
-- **Status:** GO/NO-GO 3 AWAITING LEAD REVIEW. Local Node 22 ESM / AI SDK 7.0 MCP compatibility is verified; real GitHub Action PR-comment run still requires lead-run CI/provider credentials.
+- **Phase:** 4 — The proof (PR-review bakeoff, ship gate)
+- **Slice:** not started
+- **Status:** GO/NO-GO 3 GREEN (lead-reviewed 2026-06-29; live model-backed E2E run). Phase 4 ready to begin. Residuals carried into Phase 4 — see gate-3 lead-review note.
 - **Tree:** green (2026-06-29: 99 core + 28 CLI-unit + 33 CLI integration, 0 fail)
 
 ## Next up
 
-Stop at GO/NO-GO 3 for lead review. Required Phase 3 artifacts are present: [examples/ai-sdk/review-agent.mjs](examples/ai-sdk/review-agent.mjs), [examples/ai-sdk/smoke-mcp.mjs](examples/ai-sdk/smoke-mcp.mjs), and [.github/workflows/mycelia-review.yml](.github/workflows/mycelia-review.yml). Do not start Phase 4 until the lead runs or accepts the GitHub Action/provider-credential evidence.
+Phase 4 — the ship-gate bakeoff: build a public paired benchmark (a reviewer such as PR-Agent / Claude Code Action + Mycelia vs the same reviewer alone) on real PRs with labelled findings; report token cost, false-positive rate, first-file hit rate. Ship gate decision rule in [docs/evaluation.md](docs/evaluation.md). **Carried from gate 3 (must close in Phase 4):** (a) verify AI Gateway routing with a real `vck_` key (lead to provide); (b) run the reference GitHub Action end-to-end posting a real `gh pr comment`; (c) tune the reference agent (model + `stopWhen` + instructions) to be token-lean. See [ROADMAP.md](ROADMAP.md) Phase 4.
 
 ## Gate status
 
 - [x] **GO/NO-GO 0** — determinism + measurement baseline (**GREEN — lead-reviewed 2026-06-29**)
 - [x] **GO/NO-GO 1** — per-commit index + CI artifact (**GREEN — lead-reviewed 2026-06-29**)
 - [x] **GO/NO-GO 2** — change-scoped retrieval (**GREEN — lead-reviewed 2026-06-29**)
-- [ ] GO/NO-GO 3 — Vercel AI SDK 7.0 integration
+- [x] **GO/NO-GO 3** — Vercel AI SDK 7.0 integration (**GREEN — lead-reviewed 2026-06-29**)
 - [ ] GO/NO-GO 4 — SHIP
 
 ## GO/NO-GO 3 evidence
@@ -27,6 +27,10 @@ Stop at GO/NO-GO 3 for lead review. Required Phase 3 artifacts are present: [exa
 - [x] Works on Node 22+ ESM with AI SDK 7.0 (`inputSchema`, `createMCPClient` from `@ai-sdk/mcp`, `stopWhen`): `examples/ai-sdk` pins `ai@7.0.6`, `@ai-sdk/mcp@2.0.3`, `zod@4.2.1`; smoke ran on local Node v24.14.0 (Node 22+ compatible) using `createMCPClient`, `Experimental_StdioMCPTransport`, AI SDK tool conversion with `inputSchema`, and a real `find` MCP tool call. `review-agent.mjs` imports `ToolLoopAgent` and `stepCountIs`, uses `stopWhen: stepCountIs(15)`, and routes the default model as `anthropic/claude-sonnet-4-5`.
 - [ ] End-to-end run stays within a sane token/time budget on a medium repo: local no-model MCP smoke passed and the paired eval regression remains healthy (5/5 hits, MRR 0.8, Mycelia 1,229.2 tokens/answer vs baseline 35,492.25, 96.54% token reduction), but a model-backed medium-repo CI run has not been executed.
 - **Stop-if:** integration needs `ai@6.x` patterns. No `ai@6.x` patterns used; imports are `createMCPClient` from `@ai-sdk/mcp`, `ToolLoopAgent`, `stepCountIs`, and `stopWhen`.
+
+- **LEAD REVIEW 2026-06-29 → GO/NO-GO 3 = GREEN.** Verified independently: (1) ran `examples/ai-sdk/smoke-mcp.mjs` against the release binary — AI SDK 7.0 `createMCPClient` over stdio listed all 7 tools, converted with `inputSchema`, real `find` returned the expected header. (2) Ran the reference agent live, model-backed (routed direct to Anthropic since only an Anthropic key was available; AI Gateway `vck_` key deferred by lead): Haiku made transcript-visible MCP tool calls (`find_changed` → `retrieve`/`find`/`find_related`) but over-explored and hit the 15-step limit without converging; **Sonnet (`claude-sonnet-4-6`) converged to a real 3-finding PR review grounded in retrieved chunks.** Integration + model-backed loop proven. Scope clean. **RESIDUALS carried to Phase 4 (required before ship, not blocking Phase 4 start):** (a) AI Gateway routing unproven — verify with a real `vck_` key; (b) real GitHub Action posting `gh pr comment` not executed; (c) reference agent is tool-call-heavy (~25 calls Haiku/no-converge; ~40 `retrieve` for one file with Sonnet) — tune model + `stopWhen` + instructions to be token-lean, else the "fewer tokens" value prop is undercut by agent behaviour. **Found+noted during review:** `@ai-sdk/anthropic@2.x` runs in v2-compat mode vs `ai@7.0.6` and drops `/v1` (causes 404); for direct-Anthropic use, pin `baseURL: https://api.anthropic.com/v1`. Does not affect the shipped AI-Gateway path.
+
+- **GATEWAY ROUTING VERIFIED 2026-06-29 (residual a, closed):** With a real `vck_` key, the SHIPPED `review-agent.mjs` ran the full loop through AI Gateway (`ai-gateway.vercel.sh/v4`) — auth ok, MCP tools attached, model generation executed. Vercel FREE tier blocks `anthropic/claude-sonnet-4-5` (403 "free tier no access"); free-tier models that work: `anthropic/claude-haiku-4-5`, `openai/gpt-4o-mini`, `meta/llama-3.1-8b`. Haiku via gateway ran tool calls but hit the 15-step limit without converging (same as direct Haiku) — reinforces residual (c). NET: gateway routing proven; a gateway-produced *polished* review needs paid/BYOK access to a capable model (Sonnet/Opus) AND/OR agent convergence tuning. Residual (b) — a real GitHub Action run posting `gh pr comment` — still open for Phase 4.
 
 ## GO/NO-GO 0 evidence
 
