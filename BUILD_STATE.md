@@ -4,20 +4,20 @@ Working memory for the looping build agent. **Read first, update last, every sli
 
 ## Position
 
-- **Phase:** 2 — Change-scoped retrieval (reworked; gate re-requested)
-- **Slice:** Rework complete; **waiting at GO/NO-GO 2 gate for lead review**
-- **Status:** GO/NO-GO 2 re-requested with limit-5 paired results (`hit_rate=1.0`, `MRR=0.5`, 98.35% token reduction). Stop at gate until lead reviews.
+- **Phase:** 3 — Vercel AI SDK 7.0 integration
+- **Slice:** not started
+- **Status:** GO/NO-GO 2 GREEN (lead-reviewed 2026-06-29, reproduced at limit 5). Phase 3 ready to begin.
 - **Tree:** green (2026-06-29: 99 core + 28 CLI-unit + 33 CLI integration, 0 fail)
 
 ## Next up
 
-**Wait for GO/NO-GO 2 review from the team lead.** Do not start Phase 3 until GO/NO-GO 2 is GREEN.
+Phase 3, first item: verify the MCP server is consumable via `@ai-sdk/mcp` `createMCPClient` (stdio for CI), then ship reference `review-agent.mjs` (`ToolLoopAgent` + AI Gateway, Node 22 ESM, headless) and the reference GitHub Actions workflow (checkout → cache → `mycelia ci prepare` → agent). **Target Vercel AI SDK 7.0 ONLY** — see the AI SDK guard in [AGENTS.md](AGENTS.md). See [ROADMAP.md](ROADMAP.md) Phase 3.
 
 ## Gate status
 
 - [x] **GO/NO-GO 0** — determinism + measurement baseline (**GREEN — lead-reviewed 2026-06-29**)
 - [x] **GO/NO-GO 1** — per-commit index + CI artifact (**GREEN — lead-reviewed 2026-06-29**)
-- [x] **GO/NO-GO 2** — change-scoped retrieval (**READY FOR REVIEW — relevance-ranked at limit 5**)
+- [x] **GO/NO-GO 2** — change-scoped retrieval (**GREEN — lead-reviewed 2026-06-29**)
 - [ ] GO/NO-GO 3 — Vercel AI SDK 7.0 integration
 - [ ] GO/NO-GO 4 — SHIP
 
@@ -42,6 +42,8 @@ Working memory for the looping build agent. **Read first, update last, every sli
 - **Stop-if:** change-scoped retrieval does not beat plain `find` on the PR task set. At limit 5, relevance-ranked `blast_radius` achieves 1.0 hit rate and 0.5 MRR with 98.35% token reduction.
 
 - **LEAD REVIEW 2026-06-29 → RE-REQUESTED.** Reworked `blast_radius` sorting and cross-file aggregation to score direct cross-file interactions by graph connection frequency (number of call edges connecting them to changed symbols). Re-measured paired eval at `limit: 5`: hit rate 1.0 vs 0.8 baseline, MRR 0.5 vs 0.4 baseline, token reduction 98.35%. Ready for lead gate review.
+
+- **LEAD REVIEW 2026-06-29 → GO/NO-GO 2 = GREEN.** Independently reproduced at limit 5 (byte-identical across two runs): hit_rate 1.0 vs 0.8 baseline, MRR 0.5 vs 0.4 baseline, 584 vs 35,394 tok/ans (98.35%). Per-task required-file ranks moved 9–10 → 1/4/4/2/2 (all within budget). Confirmed honest fix: manifest tasks unchanged, ranking change isolated to `store.rs` blast_radius (graph interaction count), scope clean, 160 tests green. Cleared to start Phase 3. **Carry to Phase 4 (not blocking):** (a) two required files still land at rank 4 — margin is thin at smaller budgets; (b) the Phase 2 set is small/code-keyword-shaped on Mycelia's own repo and the TS "real repo" is still a 2-file fixture — Phase 4 must use realistic NL queries, a larger labelled set, and a representative TS repo.
 
 ## Done log (append-only, terse — newest last)
 
