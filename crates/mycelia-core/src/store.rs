@@ -2853,7 +2853,7 @@ mod tests {
                 h.source_path == "helper.rs"
                     && h.signature
                         .as_deref()
-                        .map_or(false, |s| s.contains("fn helper"))
+                        .is_some_and(|s| s.contains("fn helper"))
             })
             .map(|h| h.score)
             .expect("helper chunk");

@@ -1,0 +1,19 @@
+{
+  "name": "@mycelia/ai-sdk-reference",
+  "version": "0.1.0",
+  "description": "Reference AI SDK 7.0 integration for Mycelia MCP",
+  "private": true,
+  "scripts": {
+    "smoke:mcp": "node smoke-mcp.mjs",
+    "review": "node review-agent.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "Apache-2.0",
+  "type": "module",
+  "dependencies": {
+    "@ai-sdk/mcp": "2.0.3",
+    "ai": "7.0.6",
+    "zod": "4.2.1"
+  }
+}

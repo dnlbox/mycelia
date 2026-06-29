@@ -17,6 +17,7 @@
 .DS_Store
 .idea/
 .vscode/
+node_modules/
 
 # Local Mycelia smoke data
 .mycelia/

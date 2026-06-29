@@ -68,9 +68,9 @@ _Turn the diff into the query._
 
 _Differentiator #2: consumed by a developer-written agent._
 
-- Verify the MCP server is consumable via `@ai-sdk/mcp` `createMCPClient` (stdio for CI, HTTP option).
-- Ship a reference `review-agent.mjs`: `ToolLoopAgent` + AI Gateway model routing, Node 22 ESM, runs headless.
-- Ship the reference GitHub Actions workflow (checkout → cache → `mycelia ci prepare` → agent).
+- [x] Verify the MCP server is consumable via `@ai-sdk/mcp` `createMCPClient` (stdio for CI, HTTP option).
+- [x] Ship a reference `review-agent.mjs`: `ToolLoopAgent` + AI Gateway model routing, Node 22 ESM, runs headless.
+- [x] Ship the reference GitHub Actions workflow (checkout → cache → `mycelia ci prepare` → agent).
 - _Optional:_ thin typed `@mycelia/ai-sdk` wrapper exporting `tool()` defs (only after the MCP surface is re-audited for deterministic, structured output).
 
 **GO/NO-GO 3:**

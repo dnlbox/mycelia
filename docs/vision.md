@@ -17,7 +17,7 @@ Build (or restore-then-incrementally-refresh) the index for the exact commit und
     key: mycelia-${{ runner.os }}-${{ github.sha }}
     restore-keys: mycelia-${{ runner.os }}-
 - run: mycelia ci prepare        # build/restore index at this SHA, emit cache key + env
-- run: node review-agent.mjs     # your AI-SDK agent queries the index
+- run: node examples/ai-sdk/review-agent.mjs     # your AI-SDK agent queries the index
 ```
 
 **2. When building an agentic workflow that interacts with code (Vercel AI SDK 7.0):**
@@ -26,9 +26,13 @@ Mycelia is the MCP server (the portable spine) your agent connects to, or an opt
 ```ts
 import { ToolLoopAgent, stepCountIs } from 'ai';
 import { createMCPClient } from '@ai-sdk/mcp';
+import { Experimental_StdioMCPTransport } from '@ai-sdk/mcp/mcp-stdio';
 
 const mycelia = await createMCPClient({
-  transport: { type: 'stdio', command: 'mycelia', args: ['serve'] },
+  transport: new Experimental_StdioMCPTransport({
+    command: 'mycelia',
+    args: ['serve', '--lexical'],
+  }),
 });
 const agent = new ToolLoopAgent({
   model: 'anthropic/claude-sonnet-4-5',   // via AI Gateway

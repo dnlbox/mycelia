@@ -48,7 +48,7 @@ Six strategies, all implemented:
 
 ### MCP surface (R5)
 
-Stdio, read-only. Stdout is reserved for protocol messages; diagnostics go to stderr. Six tools exposed to the model:
+Stdio, read-only. Stdout is reserved for protocol messages; diagnostics go to stderr. Seven tools exposed to the model:
 
 | Tool | Description |
 | --- | --- |
@@ -56,7 +56,8 @@ Stdio, read-only. Stdout is reserved for protocol messages; diagnostics go to st
 | `search_codebase` | Alias for `find` |
 | `locate_implementation` | Alias for `find` |
 | `retrieve` | One chunk body by `corpus:chunk_id`, freshness-validated |
-| `find_related` | Callers or callees of a symbol via the `calls` graph (Rust only today); ambiguous names returned with `resolved=false` |
+| `find_related` | Callers or callees of a symbol via the `calls` graph; ambiguous names returned with `resolved=false` |
+| `find_changed` | Changed-path chunks plus their callers and callees for PR-review orientation |
 | `list_corpora` | Registered corpus names and roots |
 
 Model-facing headers trim `source_hash`, `extractor`, and byte offsets — the model sees only what it needs to act.
@@ -82,16 +83,17 @@ See [../ROADMAP.md](../ROADMAP.md) Phase 1 and requirements R7, R8, R10 for the 
 
 ### Change-scoped retrieval (Phase 2)
 
-Given a diff, return the blast radius: changed symbols plus their callers and callees via the `calls` graph. This requires extending the calls graph to TypeScript (Vercel-ecosystem priority) and Python, keeping the same conservative resolution rules. Exposed through `find_related` and `find`.
+Given a diff, return the blast radius: changed symbols plus their callers and callees via the `calls` graph. TypeScript support is shipped for the v1 wedge; Python remains a later extension. Exposed through `find_changed`, `find_related`, and `find`.
 
 See [../ROADMAP.md](../ROADMAP.md) Phase 2.
 
 ### AI SDK integration (Phase 3)
 
-The MCP server is already consumable via `@ai-sdk/mcp` `createMCPClient` in stdio mode. Phase 3 verifies this end-to-end and ships:
+The MCP server is consumable via `@ai-sdk/mcp` `createMCPClient` in stdio mode through `Experimental_StdioMCPTransport`. Phase 3 ships:
 
-- A reference `review-agent.mjs` using `ToolLoopAgent`, AI Gateway model routing, Node 22 ESM, running headless.
-- The reference GitHub Actions workflow (checkout, cache, `mycelia ci prepare`, agent).
+- A reference [review-agent.mjs](../examples/ai-sdk/review-agent.mjs) using `ToolLoopAgent`, AI Gateway model routing, Node 22 ESM, running headless.
+- The reference GitHub Actions workflow (checkout, cache, `mycelia ci prepare`, agent) in [mycelia-review.yml](../.github/workflows/mycelia-review.yml).
+- A no-model [smoke-mcp.mjs](../examples/ai-sdk/smoke-mcp.mjs) that proves the stdio server initializes through `@ai-sdk/mcp`, exposes all seven tools, converts them to AI SDK tools with `inputSchema`, and calls `find`.
 - Optionally, a thin typed `@mycelia/ai-sdk` npm wrapper exporting `tool()` definitions, only after the MCP surface is re-audited for deterministic structured output.
 
 All AI SDK integration targets version 7.0 exclusively. See [../AGENTS.md](../AGENTS.md) for the version guard.
@@ -100,19 +102,11 @@ All AI SDK integration targets version 7.0 exclusively. See [../AGENTS.md](../AG
 
 ## Gap list
 
-The following are stubbed or absent today and are delivered by the roadmap phases listed:
+The following gaps remain after Phase 3:
 
 | Gap | Roadmap phase |
 | --- | --- |
-| `mycelia ci prepare` command | Phase 1 |
-| Artifact export / import / verify with manifest (R7) | Phase 1 |
-| Cache-key composition and emission (R8) | Phase 1 |
-| Git-diff-aware incremental refresh | Phase 1 |
-| TypeScript `calls` graph edges | Phase 2 |
 | Python `calls` graph edges | Phase 2 |
-| Change-scoped retrieval from diff | Phase 2 |
-| Reference `review-agent.mjs` (AI SDK 7.0) | Phase 3 |
-| Reference GitHub Actions workflow | Phase 3 |
 | Optional `@mycelia/ai-sdk` npm wrapper | Phase 3 |
 | Public paired benchmark (PR-review bakeoff) | Phase 4 |
 | `stats --all` | Not yet scheduled |

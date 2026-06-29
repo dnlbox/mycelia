@@ -9,7 +9,7 @@ Mycelia indexes a codebase with tree-sitter, materialises a deterministic index 
 **It is:**
 
 - A retrieval primitive: `find` (ranked headers) + `retrieve` (one fresh chunk)
-- A read-only MCP server, consumable from any AI SDK 7.0 `createMCPClient` call
+- A read-only MCP server, consumable from AI SDK 7.0 `createMCPClient`
 - A per-commit, deterministic, cache-friendly index, reproducible at a SHA
 - CI-native: ephemeral builds, lexical-only path, no model download required
 
@@ -32,7 +32,7 @@ Mycelia indexes a codebase with tree-sitter, materialises a deterministic index 
     key: mycelia-${{ runner.os }}-${{ github.sha }}
     restore-keys: mycelia-${{ runner.os }}-
 - run: mycelia ci prepare # build/restore index at this SHA, emit cache key + env
-- run: node review-agent.mjs # your AI SDK agent queries the index
+- run: node examples/ai-sdk/review-agent.mjs # your AI SDK agent queries the index
 ```
 
 See [docs/vision.md](docs/vision.md) for the full CI narrative and rationale.
@@ -42,9 +42,13 @@ See [docs/vision.md](docs/vision.md) for the full CI narrative and rationale.
 ```ts
 import { ToolLoopAgent, stepCountIs } from "ai";
 import { createMCPClient } from "@ai-sdk/mcp";
+import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio";
 
 const mycelia = await createMCPClient({
-  transport: { type: "stdio", command: "mycelia", args: ["serve"] },
+  transport: new Experimental_StdioMCPTransport({
+    command: "mycelia",
+    args: ["serve", "--lexical"],
+  }),
 });
 
 const agent = new ToolLoopAgent({
@@ -58,7 +62,7 @@ const { text } = await agent.generate({
 });
 ```
 
-See [docs/vision.md](docs/vision.md) for the full AI SDK narrative and the optional `@mycelia/ai-sdk` typed wrapper (Phase 3).
+See [examples/ai-sdk](examples/ai-sdk) for the pinned AI SDK 7.0 reference agent and no-model MCP compatibility smoke.
 
 ## Status today
 
@@ -70,14 +74,13 @@ See [docs/vision.md](docs/vision.md) for the full AI SDK narrative and the optio
 - `mycelia ci prepare` for project-local CI indexes, R8 cache-key/env emission, and lexical-only CI by default
 - `mycelia ci export` / `verify` / `import` for same-checkout CI artifact round-trips with manifest validation (R7)
 - `mycelia ci prepare --restore <artifact>` for previous-commit artifact restore plus git-diff-aware changed-path refresh
-- Read-only MCP server (stdio) with six tools: `find`, `search_codebase`, `locate_implementation`, `retrieve`, `find_related`, `list_corpora` (R5)
+- Read-only MCP server (stdio) with seven tools: `find`, `find_changed`, `search_codebase`, `locate_implementation`, `retrieve`, `find_related`, `list_corpora` (R5)
 - Rust `calls` graph: free-function, path, and macro call edges, with conservative query-time resolution
 - Optional embeddings (BAAI/bge-small-en-v1.5 via FastEmbed/ONNX); lexical-only path works without them (R6)
 
 **In progress per the roadmap:**
 
-- Change-scoped retrieval; TypeScript and Python `calls` graph (Phase 2)
-- Reference `review-agent.mjs` + GitHub Actions workflow; optional `@mycelia/ai-sdk` wrapper (Phase 3)
+- Optional `@mycelia/ai-sdk` wrapper, only after the MCP surface is re-audited for deterministic structured output
 
 See [ROADMAP.md](ROADMAP.md) for phases, gates, and sequencing.
 

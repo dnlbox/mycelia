@@ -5,13 +5,13 @@ Working memory for the looping build agent. **Read first, update last, every sli
 ## Position
 
 - **Phase:** 3 — Vercel AI SDK 7.0 integration
-- **Slice:** not started
-- **Status:** GO/NO-GO 2 GREEN (lead-reviewed 2026-06-29, reproduced at limit 5). Phase 3 ready to begin.
+- **Slice:** Phase 3 required integration artifacts complete
+- **Status:** GO/NO-GO 3 AWAITING LEAD REVIEW. Local Node 22 ESM / AI SDK 7.0 MCP compatibility is verified; real GitHub Action PR-comment run still requires lead-run CI/provider credentials.
 - **Tree:** green (2026-06-29: 99 core + 28 CLI-unit + 33 CLI integration, 0 fail)
 
 ## Next up
 
-Phase 3, first item: verify the MCP server is consumable via `@ai-sdk/mcp` `createMCPClient` (stdio for CI), then ship reference `review-agent.mjs` (`ToolLoopAgent` + AI Gateway, Node 22 ESM, headless) and the reference GitHub Actions workflow (checkout → cache → `mycelia ci prepare` → agent). **Target Vercel AI SDK 7.0 ONLY** — see the AI SDK guard in [AGENTS.md](AGENTS.md). See [ROADMAP.md](ROADMAP.md) Phase 3.
+Stop at GO/NO-GO 3 for lead review. Required Phase 3 artifacts are present: [examples/ai-sdk/review-agent.mjs](examples/ai-sdk/review-agent.mjs), [examples/ai-sdk/smoke-mcp.mjs](examples/ai-sdk/smoke-mcp.mjs), and [.github/workflows/mycelia-review.yml](.github/workflows/mycelia-review.yml). Do not start Phase 4 until the lead runs or accepts the GitHub Action/provider-credential evidence.
 
 ## Gate status
 
@@ -20,6 +20,13 @@ Phase 3, first item: verify the MCP server is consumable via `@ai-sdk/mcp` `crea
 - [x] **GO/NO-GO 2** — change-scoped retrieval (**GREEN — lead-reviewed 2026-06-29**)
 - [ ] GO/NO-GO 3 — Vercel AI SDK 7.0 integration
 - [ ] GO/NO-GO 4 — SHIP
+
+## GO/NO-GO 3 evidence
+
+- [ ] A headless AI-SDK agent in a real GitHub Action queries Mycelia and produces a PR review comment: reference workflow shipped in `.github/workflows/mycelia-review.yml` (checkout, cache, Node 22, install CLI, `mycelia ci prepare --no-embed`, `examples/ai-sdk/review-agent.mjs`, `gh pr comment`). Not executed locally; requires GitHub Actions plus AI Gateway/provider credentials.
+- [x] Works on Node 22+ ESM with AI SDK 7.0 (`inputSchema`, `createMCPClient` from `@ai-sdk/mcp`, `stopWhen`): `examples/ai-sdk` pins `ai@7.0.6`, `@ai-sdk/mcp@2.0.3`, `zod@4.2.1`; smoke ran on local Node v24.14.0 (Node 22+ compatible) using `createMCPClient`, `Experimental_StdioMCPTransport`, AI SDK tool conversion with `inputSchema`, and a real `find` MCP tool call. `review-agent.mjs` imports `ToolLoopAgent` and `stepCountIs`, uses `stopWhen: stepCountIs(15)`, and routes the default model as `anthropic/claude-sonnet-4-5`.
+- [ ] End-to-end run stays within a sane token/time budget on a medium repo: local no-model MCP smoke passed and the paired eval regression remains healthy (5/5 hits, MRR 0.8, Mycelia 1,229.2 tokens/answer vs baseline 35,492.25, 96.54% token reduction), but a model-backed medium-repo CI run has not been executed.
+- **Stop-if:** integration needs `ai@6.x` patterns. No `ai@6.x` patterns used; imports are `createMCPClient` from `@ai-sdk/mcp`, `ToolLoopAgent`, `stepCountIs`, and `stopWhen`.
 
 ## GO/NO-GO 0 evidence
 
@@ -47,6 +54,7 @@ Phase 3, first item: verify the MCP server is consumable via `@ai-sdk/mcp` `crea
 
 ## Done log (append-only, terse — newest last)
 
+- 2026-06-29 — Phase 3 / AI SDK 7.0 integration: added pinned `examples/ai-sdk` package (`ai@7.0.6`, `@ai-sdk/mcp@2.0.3`, `zod@4.2.1`), no-model `smoke-mcp.mjs`, reference `review-agent.mjs` (`ToolLoopAgent`, AI Gateway model string, `stopWhen: stepCountIs(15)`), and `.github/workflows/mycelia-review.yml` (checkout, cache, Node 22, `mycelia ci prepare --no-embed`, run agent, post PR comment). Synced README, vision, architecture, generated `.mycelia/AGENTS.md` guidance, and stale six-tool references to include `find_changed`. Mechanical clippy fixes for prior Phase 2 tests (`is_some_and`, wait after kill). Validation: npm ci ok; AI SDK MCP smoke ok (`tools=7`, `inputSchema=true`, `find` hit `src/review.ts`); fmt ok; clippy ok; workspace tests ok (99 core + 28 CLI-unit + 33 CLI integration, 0 fail); release build ok; install ok; CLI smoke ok; paired eval ok (5/5 hits, MRR 0.8, 1,229.2 vs 35,492.25 tokens/answer, 96.54% reduction); stats recorded. Stopped at GO/NO-GO 3 for lead review.
 - 2026-06-29 — Phase 2 / Rework: relevance-ranked `blast_radius` output by graph connection count (number of call edges from/to changed symbols), deduplicating cross-file hits to one lowest-byte_start chunk per file. Updated `fixtures/eval/mycelia-v1-phase2.json` to `limit: 5`. Validation: fmt ok; clippy ok; workspace tests ok (99 core + 28 CLI-unit + 33 CLI integration, 0 fail); release build ok; install ok; paired eval at limit 5 ok (`hit_rate=1.0` vs `0.8`, `MRR=0.5` vs `0.4`, `tokens_per_answer=584` vs `35,394`); MCP smoke ok. Stopped at GO/NO-GO 2 for lead review.
 - 2026-06-29 — v1 reset: docs + roadmap + build-loop established; engine inherited from `main` (tree-sitter chunking for Rust/TS/TSX/Python/Ruby, SQLite schema v5, deterministic chunk IDs, freshness, read-only MCP, Rust calls graph). Nothing built against the v1 roadmap yet.
 - 2026-06-29 — Phase 0 / Slice 1: added v1 fixed-task eval schema (`required_files`), emitted required files in eval results, rejected in-corpus eval manifests at runtime, added `fixtures/eval/mycelia-v1-code.json` with five code-only tasks, and documented the manifest contract. Validation: fmt ok; clippy ok; workspace tests ok; release build ok; install ok; CLI smoke ok; eval run 5/5 hits, MRR 0.8000, tokens/answer 1219.8; MCP smoke ok; stats ok.
@@ -74,7 +82,8 @@ Phase 3, first item: verify the MCP server is consumable via `@ai-sdk/mcp` `crea
 - Phase 1 Slice 1 converts the R6 proxy into direct evidence for default `ci prepare` lexical mode plus `--no-embed` / `--lexical`; broader R8 gate evidence still waits on artifact import/export and incremental refresh.
 - Artifact import is intentionally same-checkout for now: `verify` rejects a database whose stored `corpus_root` differs from the current checkout root. Cross-path artifact rebinding is not part of this slice and would need explicit core support because freshness and retrieve use the stored root.
 - `ci prepare --restore` is the sanctioned previous-commit path. It verifies version/schema/project/extractor/db/embedding/corpus-root compatibility, skips only previous-commit `git_commit` and `source_root_hash`, installs the artifact, computes `git diff old..HEAD`, filters internal paths, and refreshes just those changed paths.
+- AI SDK 7.0 stdio currently uses `Experimental_StdioMCPTransport` from `@ai-sdk/mcp/mcp-stdio` with stable `createMCPClient` from `@ai-sdk/mcp`. Do not use `experimental_createMCPClient` or `ai@6.x` `parameters` patterns.
 
 ## Blockers / questions for the lead
 
-- (none)
+- GO/NO-GO 3 needs a lead-run GitHub Actions/provider-credential check to prove the workflow posts a real PR comment and to record model-backed token/time budget on a medium repo.

@@ -22,7 +22,7 @@ fn agents_md_content(name: &str) -> String {
          Mandatory protocol files still come first when they define the active\n\
          contract, for example `AGENTS.md`, `BUILD_STATE.md`, or `prompt.md`.\n\
          Only say you used Mycelia when the transcript shows an actual Mycelia\n\
-         MCP tool call such as `find`, `locate_implementation`,\n\
+         MCP tool call such as `find`, `find_changed`, `locate_implementation`,\n\
          `search_codebase`, `retrieve`, `find_related`, or `list_corpora`.\n\
          If the MCP tools are not available, say that plainly and use shell\n\
          search as a fallback. Do not describe `rg`, `grep`, `sed`, `nl`, or\n\
@@ -45,6 +45,9 @@ fn agents_md_content(name: &str) -> String {
          - `find_related(symbol, direction, corpus?)`: inspect sourced `calls`\n\
            relationships. Use `direction=\"callers\"` for who calls a symbol and\n\
            `direction=\"callees\"` for what a symbol calls.\n\
+         - `find_changed(paths, limit?, corpus?)`: PR-review orientation. Pass\n\
+           changed paths relative to the corpus root to get changed chunks plus\n\
+           their callers and callees.\n\
          - `list_corpora()`: disambiguate available corpora only when the user\n\
            names another project or Mycelia asks for a corpus.\n\
          \n\
@@ -56,9 +59,11 @@ fn agents_md_content(name: &str) -> String {
             read exact files or lines for edits and verification.\n\
          3. Use `find_related` for call graph questions instead of trying to infer\n\
             relationships from text search.\n\
-         4. Use grep/read directly for exact literals, known files, generated\n\
+         4. Use `find_changed` first for PR-review or change-impact tasks when\n\
+            changed paths are known.\n\
+         5. Use grep/read directly for exact literals, known files, generated\n\
             output, lockfiles, or after Mycelia misses.\n\
-         5. If the first result set is broad, refine the Mycelia query once before\n\
+         6. If the first result set is broad, refine the Mycelia query once before\n\
             falling back to grep.\n\
          \n\
          ## Few-shot patterns\n\

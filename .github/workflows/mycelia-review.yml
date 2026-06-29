@@ -1,0 +1,54 @@
+name: Mycelia Review Agent
+
+on:
+  pull_request:
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/cache@v4
+        with:
+          path: .mycelia/
+          key: mycelia-${{ runner.os }}-${{ github.sha }}
+          restore-keys: mycelia-${{ runner.os }}-
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: examples/ai-sdk/package-lock.json
+
+      - run: cargo install --locked --path crates/mycelia-cli
+
+      - run: mycelia ci prepare --no-embed
+
+      - run: npm ci
+        working-directory: examples/ai-sdk
+
+      - name: Collect changed paths
+        run: |
+          git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" > "$RUNNER_TEMP/mycelia-changed-paths.txt"
+
+      - name: Run Mycelia review agent
+        working-directory: examples/ai-sdk
+        env:
+          MYCELIA_PROJECT_ROOT: ${{ github.workspace }}
+          MYCELIA_CHANGED_PATHS: ${{ runner.temp }}/mycelia-changed-paths.txt
+          AI_GATEWAY_MODEL: anthropic/claude-sonnet-4-5
+        run: node review-agent.mjs > "$RUNNER_TEMP/mycelia-review.md"
+
+      - name: Post review comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment "${{ github.event.pull_request.number }}" --body-file "$RUNNER_TEMP/mycelia-review.md"

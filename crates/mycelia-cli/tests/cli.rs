@@ -2018,26 +2018,23 @@ fn stdio_mcp_find_changed_returns_blast_radius() {
     let headers = headers.as_array().expect("headers array");
 
     // helper.ts chunk must be present (the changed file itself).
-    let has_helper = headers.iter().any(|h| {
-        h["source_path"]
-            .as_str()
-            .map_or(false, |p| p == "helper.ts")
-    });
+    let has_helper = headers
+        .iter()
+        .any(|h| h["source_path"].as_str() == Some("helper.ts"));
     assert!(
         has_helper,
         "expected helper.ts chunk in find_changed result; got: {headers:#?}"
     );
 
     // caller.ts chunk must be present (the blast-radius caller of formatHelper).
-    let has_caller = headers.iter().any(|h| {
-        h["source_path"]
-            .as_str()
-            .map_or(false, |p| p == "caller.ts")
-    });
+    let has_caller = headers
+        .iter()
+        .any(|h| h["source_path"].as_str() == Some("caller.ts"));
     assert!(
         has_caller,
         "expected caller.ts in blast radius; got: {headers:#?}"
     );
 
     child.kill().ok();
+    child.wait().expect("wait for MCP server");
 }
