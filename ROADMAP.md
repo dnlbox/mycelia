@@ -36,7 +36,7 @@ _Differentiators #1 and #3 become real._
 
 - [x] Implement `mycelia ci prepare`: build-or-restore the index at the current commit, validate schema, emit the cache key (R8) and env for downstream steps.
 - [x] Implement artifact `export` / `import` / `verify` with the manifest format (R7).
-- [ ] Implement git-diff-aware **incremental refresh** (restore previous artifact → update only changed files).
+- [x] Implement git-diff-aware **incremental refresh** (restore previous artifact → update only changed files).
 
 **GO/NO-GO 1:**
 

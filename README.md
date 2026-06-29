@@ -69,13 +69,13 @@ See [docs/vision.md](docs/vision.md) for the full AI SDK narrative and the optio
 - Freshness-validated retrieval: fresh chunk, live whole file on drift, or `unavailable` (R2)
 - `mycelia ci prepare` for project-local CI indexes, R8 cache-key/env emission, and lexical-only CI by default
 - `mycelia ci export` / `verify` / `import` for same-checkout CI artifact round-trips with manifest validation (R7)
+- `mycelia ci prepare --restore <artifact>` for previous-commit artifact restore plus git-diff-aware changed-path refresh
 - Read-only MCP server (stdio) with six tools: `find`, `search_codebase`, `locate_implementation`, `retrieve`, `find_related`, `list_corpora` (R5)
 - Rust `calls` graph: free-function, path, and macro call edges, with conservative query-time resolution
 - Optional embeddings (BAAI/bge-small-en-v1.5 via FastEmbed/ONNX); lexical-only path works without them (R6)
 
 **In progress per the roadmap:**
 
-- Git-diff-aware incremental refresh (Phase 1)
 - Change-scoped retrieval; TypeScript and Python `calls` graph (Phase 2)
 - Reference `review-agent.mjs` + GitHub Actions workflow; optional `@mycelia/ai-sdk` wrapper (Phase 3)
 

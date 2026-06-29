@@ -17,6 +17,12 @@ const MIGRATION_004: &str = include_str!("../migrations/004_source_extractor.sql
 const MIGRATION_005: &str = include_str!("../migrations/005_graph_edges.sql");
 pub(crate) const LATEST_SCHEMA_VERSION: i64 = 5;
 
+#[derive(Clone, Copy)]
+struct IndexMode {
+    force: bool,
+    prune_missing: bool,
+}
+
 /// A stored embedding with the cheap keys needed to rank it, but without the
 /// chunk body. Bodies are hydrated only for the ranked winners.
 pub(crate) struct EmbeddingVector {
@@ -37,6 +43,37 @@ pub(crate) fn reindex_corpus(root: &Path, database: &Path) -> Result<IndexReport
     index_corpus_inner(root, database, true)
 }
 
+pub(crate) fn refresh_changed_sources<I, P>(
+    root: &Path,
+    database: &Path,
+    relative_paths: I,
+) -> Result<IndexReport>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<Path>,
+{
+    let started_at = Instant::now();
+    let canonical_root = canonicalize_root(root)?;
+    let files = relative_paths
+        .into_iter()
+        .map(|path| canonical_root.join(path.as_ref()))
+        .collect::<Vec<_>>();
+    let mut report = index_corpus_with_files(
+        canonical_root.as_path(),
+        database,
+        files,
+        0,
+        crate::extract::extract_text,
+        crate::extract::extractor_id_for,
+        IndexMode {
+            force: false,
+            prune_missing: false,
+        },
+    )?;
+    report.elapsed_ms = started_at.elapsed().as_millis();
+    Ok(report)
+}
+
 fn index_corpus_inner(root: &Path, database: &Path, force: bool) -> Result<IndexReport> {
     let started_at = Instant::now();
     let canonical_root = canonicalize_root(root)?;
@@ -53,7 +90,10 @@ fn index_corpus_inner(root: &Path, database: &Path, force: bool) -> Result<Index
         discovery.rejected,
         crate::extract::extract_text,
         crate::extract::extractor_id_for,
-        force,
+        IndexMode {
+            force,
+            prune_missing: true,
+        },
     )?;
     report.elapsed_ms = started_at.elapsed().as_millis();
     Ok(report)
@@ -842,7 +882,7 @@ fn index_corpus_with_files<I, P, E, G>(
     initially_rejected: usize,
     extract_fn: E,
     extractor_id_fn: G,
-    force: bool,
+    mode: IndexMode,
 ) -> Result<IndexReport>
 where
     I: IntoIterator<Item = P>,
@@ -877,7 +917,9 @@ where
                 Err(Error::Io { .. }) => {
                     report.rejected += 1;
                     if let Some(path) = relative_hint {
-                        evict_source(&transaction, &mut existing_sources, path.as_str())?;
+                        if evict_source(&transaction, &mut existing_sources, path.as_str())? {
+                            report.removed += 1;
+                        }
                         seen_paths.insert(path);
                     }
                     continue;
@@ -891,7 +933,9 @@ where
             Err(_) => {
                 report.rejected += 1;
                 if let Some(path) = relative_hint {
-                    evict_source(&transaction, &mut existing_sources, path.as_str())?;
+                    if evict_source(&transaction, &mut existing_sources, path.as_str())? {
+                        report.removed += 1;
+                    }
                     seen_paths.insert(path);
                 }
                 continue;
@@ -906,13 +950,15 @@ where
             Ok(bytes) => bytes,
             Err(_) => {
                 report.rejected += 1;
-                evict_source(&transaction, &mut existing_sources, relative_path.as_str())?;
+                if evict_source(&transaction, &mut existing_sources, relative_path.as_str())? {
+                    report.removed += 1;
+                }
                 continue;
             }
         };
         let source_hash = blake3::hash(bytes.as_slice()).to_hex().to_string();
 
-        if !force
+        if !mode.force
             && existing_sources.get(relative_path.as_str()).is_some_and(
                 |(existing_hash, existing_extractor)| {
                     existing_hash == &source_hash && existing_extractor == would_use_extractor
@@ -927,7 +973,9 @@ where
             Ok(text) => text,
             Err(_) => {
                 report.rejected += 1;
-                evict_source(&transaction, &mut existing_sources, relative_path.as_str())?;
+                if evict_source(&transaction, &mut existing_sources, relative_path.as_str())? {
+                    report.removed += 1;
+                }
                 continue;
             }
         };
@@ -949,15 +997,17 @@ where
         }
     }
 
-    let stale_paths: Vec<String> = existing_sources
-        .keys()
-        .filter(|path| !seen_paths.contains(*path))
-        .cloned()
-        .collect();
-    for stale_path in &stale_paths {
-        transaction.execute("DELETE FROM sources WHERE path = ?1", [stale_path])?;
+    if mode.prune_missing {
+        let stale_paths: Vec<String> = existing_sources
+            .keys()
+            .filter(|path| !seen_paths.contains(*path))
+            .cloned()
+            .collect();
+        for stale_path in &stale_paths {
+            transaction.execute("DELETE FROM sources WHERE path = ?1", [stale_path])?;
+        }
+        report.removed += stale_paths.len();
     }
-    report.removed = stale_paths.len();
 
     transaction.commit()?;
     Ok(report)
@@ -1213,10 +1263,9 @@ fn evict_source(
     transaction: &rusqlite::Transaction<'_>,
     existing_sources: &mut BTreeMap<String, (String, String)>,
     source_path: &str,
-) -> Result<()> {
+) -> Result<bool> {
     transaction.execute("DELETE FROM sources WHERE path = ?1", [source_path])?;
-    existing_sources.remove(source_path);
-    Ok(())
+    Ok(existing_sources.remove(source_path).is_some())
 }
 
 fn chunk_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChunkRecord> {
@@ -1521,7 +1570,10 @@ mod tests {
             0,
             test_extract_text,
             |_| "test-extractor",
-            false,
+            IndexMode {
+                force: false,
+                prune_missing: true,
+            },
         )
     }
 
@@ -1955,6 +2007,46 @@ mod tests {
             .collect::<rusqlite::Result<Vec<_>>>()
             .expect("collect source paths");
         assert_eq!(source_paths, vec!["alpha.txt".to_owned()]);
+    }
+
+    #[test]
+    fn changed_source_refresh_does_not_prune_unchanged_sources() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("corpus");
+        write_text_file(root.join("alpha.txt").as_path(), "alpha");
+        write_text_file(root.join("beta.txt").as_path(), "beta");
+        write_text_file(root.join("gamma.txt").as_path(), "gamma");
+        let database = temp.path().join("mycelia.sqlite3");
+
+        index_fixture(root.as_path(), database.as_path()).expect("first index");
+        write_text_file(root.join("alpha.txt").as_path(), "alpha changed");
+        fs::remove_file(root.join("beta.txt")).expect("remove beta");
+
+        let report = refresh_changed_sources(
+            root.as_path(),
+            database.as_path(),
+            ["alpha.txt", "beta.txt"],
+        )
+        .expect("changed refresh");
+        assert_eq!(report.discovered, 2);
+        assert_eq!(report.indexed, 1);
+        assert_eq!(report.removed, 1);
+        assert_eq!(report.rejected, 1);
+        assert_eq!(report.chunks_written, 1);
+
+        let hits = find(
+            database.as_path(),
+            "gamma",
+            10,
+            RetrievalStrategy::Substring,
+        )
+        .expect("find gamma");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].chunk.source_path, "gamma.txt");
+
+        let removed =
+            find(database.as_path(), "beta", 10, RetrievalStrategy::Substring).expect("find beta");
+        assert!(removed.is_empty());
     }
 
     #[test]

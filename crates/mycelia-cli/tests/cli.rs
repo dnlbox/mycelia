@@ -430,6 +430,97 @@ fn ci_artifact_verify_rejects_named_manifest_mismatch() {
 }
 
 #[test]
+fn ci_prepare_restore_refreshes_only_git_changed_paths() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path().join("corpus");
+    fs::create_dir_all(&root).expect("root dir");
+    init_committed_git(&root);
+    write_file(&root.join("alpha.rs"), "fn alpha_symbol() {}\n");
+    write_file(&root.join("beta.rs"), "fn beta_symbol() {}\n");
+    write_file(&root.join("stable.rs"), "fn stable_symbol() {}\n");
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-m", "initial"]);
+
+    run_success(&["ci", "prepare", "--json", root.to_str().expect("root")]);
+    let artifact_dir = temp.path().join("artifact");
+    run_success(&[
+        "ci",
+        "export",
+        artifact_dir.to_str().expect("artifact"),
+        root.to_str().expect("root"),
+        "--json",
+    ]);
+
+    write_file(&root.join("alpha.rs"), "fn alpha_symbol_changed() {}\n");
+    fs::remove_file(root.join("beta.rs")).expect("remove beta");
+    write_file(&root.join("gamma.rs"), "fn gamma_symbol() {}\n");
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-m", "second"]);
+
+    let report: Value = serde_json::from_str(&run_success(&[
+        "ci",
+        "prepare",
+        "--restore",
+        artifact_dir.to_str().expect("artifact"),
+        "--json",
+        root.to_str().expect("root"),
+    ]))
+    .expect("prepare report");
+    assert_eq!(report["changed_paths"], 3);
+    assert_eq!(report["files_indexed"], 2);
+    assert_eq!(report["files_removed"], 1);
+    assert!(report["restored_from"].as_str().is_some());
+
+    let database = root.join(".mycelia/db/index.sqlite3");
+    let alpha = run_success(&[
+        "find",
+        "alpha_symbol_changed",
+        "--database",
+        database.to_str().expect("database"),
+        "--json",
+    ]);
+    assert_eq!(
+        serde_json::from_str::<Value>(&alpha)
+            .expect("alpha hits")
+            .as_array()
+            .expect("alpha array")
+            .len(),
+        1
+    );
+
+    let stable = run_success(&[
+        "find",
+        "stable_symbol",
+        "--database",
+        database.to_str().expect("database"),
+        "--json",
+    ]);
+    assert_eq!(
+        serde_json::from_str::<Value>(&stable)
+            .expect("stable hits")
+            .as_array()
+            .expect("stable array")
+            .len(),
+        1
+    );
+
+    let beta = run_success(&[
+        "find",
+        "beta_symbol",
+        "--database",
+        database.to_str().expect("database"),
+        "--json",
+    ]);
+    assert!(
+        serde_json::from_str::<Value>(&beta)
+            .expect("beta hits")
+            .as_array()
+            .expect("beta array")
+            .is_empty()
+    );
+}
+
+#[test]
 fn setup_no_embed_supports_default_find_without_model_cache() {
     let temp = TempDir::new().expect("tempdir");
     let root = temp.path().join("corpus");

@@ -72,6 +72,19 @@ pub fn reindex_corpus(root: &Path, database: &Path) -> Result<IndexReport> {
     store::reindex_corpus(root, database)
 }
 
+/// Refreshes exactly the supplied relative paths without pruning other indexed sources.
+pub fn refresh_changed_sources<I, P>(
+    root: &Path,
+    database: &Path,
+    relative_paths: I,
+) -> Result<IndexReport>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<Path>,
+{
+    store::refresh_changed_sources(root, database, relative_paths)
+}
+
 /// Finds chunks with the default reranked FTS5 retrieval strategy.
 pub fn find(database: &Path, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
     find_with_strategy(database, query, limit, RetrievalStrategy::Fts5Reranked)

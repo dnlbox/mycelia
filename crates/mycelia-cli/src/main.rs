@@ -267,6 +267,9 @@ enum CiCommand {
         /// Also refresh embeddings. This may download the embedding model.
         #[arg(long, conflicts_with_all = ["no_embed", "lexical"])]
         embed: bool,
+        /// Restore a previous-commit artifact before refreshing changed files.
+        #[arg(long, value_name = "ARTIFACT_DIR")]
+        restore: Option<PathBuf>,
         /// Emit a machine-readable report.
         #[arg(long)]
         json: bool,
@@ -319,6 +322,8 @@ struct CiPrepareReport {
     files_removed: usize,
     files_rejected: usize,
     github_env_written: Option<PathBuf>,
+    restored_from: Option<PathBuf>,
+    changed_paths: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -635,8 +640,9 @@ where
                 no_embed,
                 lexical,
                 embed,
+                restore,
                 json,
-            } => cmd_ci_prepare(path, !embed || no_embed || lexical, json),
+            } => cmd_ci_prepare(path, !embed || no_embed || lexical, restore, json),
             CiCommand::Export {
                 artifact_dir,
                 path,
@@ -792,7 +798,12 @@ where
     }
 }
 
-fn cmd_ci_prepare(path: Option<PathBuf>, lexical: bool, json: bool) -> Result<()> {
+fn cmd_ci_prepare(
+    path: Option<PathBuf>,
+    lexical: bool,
+    restore: Option<PathBuf>,
+    json: bool,
+) -> Result<()> {
     let root = resolve_git_root(path)?;
     let name = root
         .file_name()
@@ -803,7 +814,21 @@ fn cmd_ci_prepare(path: Option<PathBuf>, lexical: bool, json: bool) -> Result<()
 
     project::init_project(&root, &name)?;
     let database = root.join(".mycelia").join("db").join("index.sqlite3");
-    let index_report = mycelia_core::index_corpus(&root, &database).map_err(|e| e.to_string())?;
+    let (index_report, restored_from, changed_paths) = if let Some(artifact_dir) = restore {
+        let artifact_dir = artifact_dir
+            .canonicalize()
+            .map_err(|e| format!("invalid artifact dir {}: {e}", artifact_dir.display()))?;
+        let manifest = verify_artifact_for_restore(&artifact_dir, &root)?;
+        install_artifact_db(&artifact_dir, &root, manifest.db_files.as_slice())?;
+        let changed_paths =
+            git_changed_paths(&root, manifest.git_commit.as_str(), commit.as_str())?;
+        let report = mycelia_core::refresh_changed_sources(&root, &database, changed_paths.iter())
+            .map_err(|e| e.to_string())?;
+        (report, Some(artifact_dir), changed_paths.len())
+    } else {
+        let report = mycelia_core::index_corpus(&root, &database).map_err(|e| e.to_string())?;
+        (report, None, 0)
+    };
 
     if !lexical {
         let mut provider = prepare_embedding_provider(&database)?;
@@ -842,6 +867,8 @@ fn cmd_ci_prepare(path: Option<PathBuf>, lexical: bool, json: bool) -> Result<()
         files_removed: index_report.removed,
         files_rejected: index_report.rejected,
         github_env_written,
+        restored_from,
+        changed_paths,
     };
 
     emit_output(if json {
@@ -903,25 +930,7 @@ fn cmd_ci_import(artifact_dir: PathBuf, path: Option<PathBuf>, json: bool) -> Re
     let manifest = verify_artifact_for_root(&artifact_dir, &root)?;
     let project_name = project_name_for_root(&root)?;
     project::init_project(&root, &project_name)?;
-
-    let db_dir = root.join(".mycelia").join("db");
-    fs::create_dir_all(&db_dir)
-        .map_err(|e| format!("failed to create {}: {e}", db_dir.display()))?;
-    for db_file in &manifest.db_files {
-        let source = artifact_dir.join(db_file);
-        let destination = root.join(".mycelia").join(db_file);
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
-        }
-        fs::copy(&source, &destination).map_err(|e| {
-            format!(
-                "failed to copy {} to {}: {e}",
-                source.display(),
-                destination.display()
-            )
-        })?;
-    }
+    install_artifact_db(&artifact_dir, &root, manifest.db_files.as_slice())?;
 
     let database = root.join(".mycelia").join("db").join("index.sqlite3");
     let _ = mycelia_core::corpus_status(&database).map_err(|e| e.to_string())?;
@@ -949,6 +958,18 @@ fn build_artifact_manifest(root: &Path, database: &Path) -> Result<ArtifactManif
 }
 
 fn verify_artifact_for_root(artifact_dir: &Path, root: &Path) -> Result<ArtifactManifest> {
+    verify_artifact(artifact_dir, root, true)
+}
+
+fn verify_artifact_for_restore(artifact_dir: &Path, root: &Path) -> Result<ArtifactManifest> {
+    verify_artifact(artifact_dir, root, false)
+}
+
+fn verify_artifact(
+    artifact_dir: &Path,
+    root: &Path,
+    exact_checkout: bool,
+) -> Result<ArtifactManifest> {
     let manifest_path = artifact_dir.join("manifest.json");
     let contents = fs::read_to_string(&manifest_path)
         .map_err(|e| format!("failed to read {}: {e}", manifest_path.display()))?;
@@ -970,18 +991,20 @@ fn verify_artifact_for_root(artifact_dir: &Path, root: &Path) -> Result<Artifact
         project_name_for_root(root)?.as_str(),
         manifest.project_name.as_str(),
     )?;
-    verify_field(
-        "git_commit",
-        git_output(root, ["rev-parse", "HEAD"])?.as_str(),
-        manifest.git_commit.as_str(),
-    )?;
-    verify_field(
-        "source_root_hash",
-        mycelia_core::source_root_hash(root)
-            .map_err(|e| e.to_string())?
-            .as_str(),
-        manifest.source_root_hash.as_str(),
-    )?;
+    if exact_checkout {
+        verify_field(
+            "git_commit",
+            git_output(root, ["rev-parse", "HEAD"])?.as_str(),
+            manifest.git_commit.as_str(),
+        )?;
+        verify_field(
+            "source_root_hash",
+            mycelia_core::source_root_hash(root)
+                .map_err(|e| e.to_string())?
+                .as_str(),
+            manifest.source_root_hash.as_str(),
+        )?;
+    }
     verify_vec_field(
         "extractors",
         extractor_versions().as_slice(),
@@ -1014,6 +1037,84 @@ fn verify_artifact_for_root(artifact_dir: &Path, root: &Path) -> Result<Artifact
     )?;
 
     Ok(manifest)
+}
+
+fn install_artifact_db(artifact_dir: &Path, root: &Path, db_files: &[String]) -> Result<()> {
+    let db_dir = root.join(".mycelia").join("db");
+    fs::create_dir_all(&db_dir)
+        .map_err(|e| format!("failed to create {}: {e}", db_dir.display()))?;
+
+    for sidecar in ["index.sqlite3", "index.sqlite3-wal", "index.sqlite3-shm"] {
+        let path = db_dir.join(sidecar);
+        if path.exists() {
+            fs::remove_file(&path)
+                .map_err(|e| format!("failed to remove {}: {e}", path.display()))?;
+        }
+    }
+
+    for db_file in db_files {
+        let source = artifact_dir.join(db_file);
+        let destination = root.join(".mycelia").join(db_file);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
+        }
+        fs::copy(&source, &destination).map_err(|e| {
+            format!(
+                "failed to copy {} to {}: {e}",
+                source.display(),
+                destination.display()
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn git_changed_paths(root: &Path, from_commit: &str, to_commit: &str) -> Result<Vec<PathBuf>> {
+    let range = format!("{from_commit}..{to_commit}");
+    let output = ProcessCommand::new("git")
+        .arg("-C")
+        .arg(root)
+        .args([
+            "diff",
+            "--name-only",
+            "--diff-filter=ACMRTD",
+            range.as_str(),
+        ])
+        .output()
+        .map_err(|e| format!("failed to run git diff: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "failed to compute changed paths from artifact commit {from_commit}: {}",
+            stderr.trim()
+        ));
+    }
+
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|e| format!("git diff output was not UTF-8: {e}"))?;
+    stdout
+        .lines()
+        .filter(|line| !is_internal_relative_path(line))
+        .map(|line| {
+            if !is_safe_relative_source_path(line) {
+                Err(format!("git diff returned unsafe path: {line}"))
+            } else {
+                Ok(PathBuf::from(line))
+            }
+        })
+        .collect()
+}
+
+fn is_internal_relative_path(path: &str) -> bool {
+    Path::new(path).components().any(|component| {
+        matches!(
+            component,
+            Component::Normal(name)
+                if name == ".mycelia" || name == ".git" || name == ".hg" || name == ".svn"
+        )
+    })
 }
 
 fn prepare_artifact_dir(path: &Path) -> Result<PathBuf> {
