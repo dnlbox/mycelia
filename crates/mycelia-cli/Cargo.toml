@@ -10,6 +10,7 @@ name = "mycelia"
 path = "src/main.rs"
 
 [dependencies]
+blake3.workspace = true
 clap.workspace = true
 fastembed.workspace = true
 mycelia-core = { path = "../mycelia-core" }

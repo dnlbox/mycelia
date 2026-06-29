@@ -50,6 +50,16 @@ pub fn index_corpus(root: &Path, database: &Path) -> Result<IndexReport> {
     store::index_corpus(root, database)
 }
 
+/// Current SQLite schema version expected by this build.
+pub fn schema_version() -> i64 {
+    store::LATEST_SCHEMA_VERSION
+}
+
+/// Extractor version strings that participate in cache-key composition.
+pub fn extractor_versions() -> &'static [&'static str] {
+    extract::EXTRACTOR_VERSIONS
+}
+
 /// Forces a full re-index of a corpus, re-extracting even unchanged sources so a
 /// schema or extractor upgrade (such as the call graph) backfills. This is the
 /// re-index behind `mycelia refresh`.

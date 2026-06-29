@@ -1328,6 +1328,7 @@ dependencies = [
 name = "mycelia-cli"
 version = "0.1.4"
 dependencies = [
+ "blake3",
  "clap",
  "fastembed",
  "mycelia-core",

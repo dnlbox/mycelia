@@ -8,6 +8,14 @@ const EXTRACTOR_TS: &str = "tree-sitter-typescript-v1";
 const EXTRACTOR_TSX: &str = "tree-sitter-tsx-v1";
 const EXTRACTOR_PY: &str = "tree-sitter-python-v1";
 const EXTRACTOR_RUBY: &str = "tree-sitter-ruby-v1";
+pub(crate) const EXTRACTOR_VERSIONS: &[&str] = &[
+    EXTRACTOR_PLAIN,
+    EXTRACTOR_RUST,
+    EXTRACTOR_TS,
+    EXTRACTOR_TSX,
+    EXTRACTOR_PY,
+    EXTRACTOR_RUBY,
+];
 
 const TOP_LEVEL_KINDS_RUST: &[&str] = &[
     "function_item",

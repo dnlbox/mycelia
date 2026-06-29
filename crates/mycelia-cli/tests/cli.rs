@@ -9,6 +9,28 @@ fn init_git(root: &Path) {
     fs::create_dir_all(root.join(".git")).expect("create .git dir");
 }
 
+fn git(root: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .expect("run git");
+    assert!(
+        output.status.success(),
+        "git {:?} failed\nstdout:\n{}\nstderr:\n{}",
+        args,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn init_committed_git(root: &Path) {
+    git(root, &["init"]);
+    git(root, &["config", "user.email", "mycelia@example.test"]);
+    git(root, &["config", "user.name", "Mycelia Test"]);
+}
+
 fn bin_path() -> &'static str {
     env!("CARGO_BIN_EXE_mycelia")
 }
@@ -36,6 +58,14 @@ fn run_with_homes(args: &[&str], config_home: &Path, data_home: &Path) -> std::p
         .env("MYCELIA_DATA_HOME", data_home)
         .output()
         .expect("run mycelia with isolated homes")
+}
+
+fn run_with_github_env(args: &[&str], github_env: &Path) -> std::process::Output {
+    Command::new(bin_path())
+        .args(args)
+        .env("GITHUB_ENV", github_env)
+        .output()
+        .expect("run mycelia with GITHUB_ENV")
 }
 
 fn run_success_with_homes(args: &[&str], config_home: &Path, data_home: &Path) -> String {
@@ -175,6 +205,116 @@ fn routed_find_without_embeddings_falls_back_to_lexical() {
             .exists(),
         "routed fallback must not initialize the embedding model cache"
     );
+}
+
+#[test]
+fn ci_prepare_defaults_to_lexical_and_writes_env() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path();
+    init_committed_git(root);
+    fs::create_dir_all(root.join("src")).expect("src dir");
+    write_file(
+        &root.join("src/lib.rs"),
+        "pub fn prepare_ci_cache_key() -> &'static str { \"needle\" }\n",
+    );
+    git(root, &["add", "."]);
+    git(root, &["commit", "-m", "initial"]);
+    let commit = String::from_utf8(
+        Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .expect("rev-parse")
+            .stdout,
+    )
+    .expect("commit utf8")
+    .trim()
+    .to_string();
+
+    let github_env = root.join("github.env");
+    let output = run_with_github_env(
+        &["ci", "prepare", "--json", root.to_str().expect("root")],
+        &github_env,
+    );
+    let stdout = successful_stdout(output);
+    let report: Value = serde_json::from_str(&stdout).expect("json report");
+
+    assert_eq!(report["git_commit"], commit);
+    assert_eq!(report["schema_version"], 5);
+    assert_eq!(report["lexical"], true);
+    assert!(
+        report["cache_key"]
+            .as_str()
+            .expect("cache key")
+            .contains(&format!("commit{commit}")),
+        "cache key did not include commit: {}",
+        report["cache_key"]
+    );
+    assert!(
+        root.join(".mycelia/db/index.sqlite3").is_file(),
+        "project-local database missing"
+    );
+
+    let env = fs::read_to_string(&github_env).expect("github env");
+    assert!(env.contains("MYCELIA_PROJECT_ROOT="));
+    assert!(env.contains("MYCELIA_DATABASE="));
+    assert!(env.contains("MYCELIA_CACHE_KEY="));
+    assert!(env.contains("MYCELIA_GIT_COMMIT="));
+
+    let find = run_success(&[
+        "find",
+        "prepare_ci_cache_key",
+        "--database",
+        root.join(".mycelia/db/index.sqlite3")
+            .to_str()
+            .expect("database"),
+        "--json",
+    ]);
+    let hits: Value = serde_json::from_str(&find).expect("find json");
+    assert_eq!(hits.as_array().expect("hits").len(), 1);
+}
+
+#[test]
+fn ci_prepare_cache_key_is_stable_until_project_config_changes() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path();
+    init_committed_git(root);
+    write_file(
+        root.join("main.rs").as_path(),
+        "fn cache_key_fixture() {}\n",
+    );
+    git(root, &["add", "."]);
+    git(root, &["commit", "-m", "initial"]);
+
+    let first: Value = serde_json::from_str(&run_success(&[
+        "ci",
+        "prepare",
+        "--no-embed",
+        "--json",
+        root.to_str().expect("root"),
+    ]))
+    .expect("first report");
+    let second: Value = serde_json::from_str(&run_success(&[
+        "ci",
+        "prepare",
+        "--no-embed",
+        "--json",
+        root.to_str().expect("root"),
+    ]))
+    .expect("second report");
+    assert_eq!(first["cache_key"], second["cache_key"]);
+
+    write_file(&root.join(".mycelia/config.toml"), "name = \"renamed\"\n");
+    let third: Value = serde_json::from_str(&run_success(&[
+        "ci",
+        "prepare",
+        "--no-embed",
+        "--json",
+        root.to_str().expect("root"),
+    ]))
+    .expect("third report");
+    assert_ne!(first["cache_key"], third["cache_key"]);
 }
 
 #[test]

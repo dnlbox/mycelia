@@ -9,9 +9,10 @@ use mycelia_core::{
     self, ChunkRecord, Direction, EmbeddingReport, EvaluationCase, EvaluationReport, IndexReport,
     PairedEvaluationReport, RelatedHit, RetrievalStrategy, Retrieved, SearchHeader,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command as ProcessCommand;
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -173,6 +174,11 @@ enum Command {
     },
     /// Retired command group. Use setup, status, and list instead.
     Corpus,
+    /// CI-oriented commands for preparing deterministic per-commit indexes.
+    Ci {
+        #[command(subcommand)]
+        command: CiCommand,
+    },
     /// Search the index and print ranked headers.
     Find {
         query: String,
@@ -244,6 +250,45 @@ enum Command {
         #[arg(long)]
         lexical: bool,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum CiCommand {
+    /// Build or refresh the project-local index for the current git commit.
+    Prepare {
+        /// Project root. Defaults to the git root of the current directory.
+        path: Option<PathBuf>,
+        /// Keep the CI path lexical-only. This is the default.
+        #[arg(long)]
+        no_embed: bool,
+        /// Alias for --no-embed. This is the default.
+        #[arg(long)]
+        lexical: bool,
+        /// Also refresh embeddings. This may download the embedding model.
+        #[arg(long, conflicts_with_all = ["no_embed", "lexical"])]
+        embed: bool,
+        /// Emit a machine-readable report.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Serialize)]
+struct CiPrepareReport {
+    project_root: PathBuf,
+    database: PathBuf,
+    cache_key: String,
+    git_commit: String,
+    schema_version: i64,
+    extractor_versions: Vec<String>,
+    project_config_hash: String,
+    extractor_hash: String,
+    lexical: bool,
+    chunks_written: usize,
+    files_indexed: usize,
+    files_removed: usize,
+    files_rejected: usize,
+    github_env_written: Option<PathBuf>,
 }
 
 // Target resolution
@@ -533,6 +578,15 @@ where
             "`mycelia corpus` has been retired. Use `mycelia setup`, `mycelia status`, or `mycelia list`."
                 .to_string(),
         ),
+        Command::Ci { command } => match command {
+            CiCommand::Prepare {
+                path,
+                no_embed,
+                lexical,
+                embed,
+                json,
+            } => cmd_ci_prepare(path, !embed || no_embed || lexical, json),
+        },
 
         Command::Find {
             query,
@@ -670,6 +724,186 @@ where
             )
         }
     }
+}
+
+fn cmd_ci_prepare(path: Option<PathBuf>, lexical: bool, json: bool) -> Result<()> {
+    let root = resolve_git_root(path)?;
+    let name = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(str::to_owned)
+        .ok_or_else(|| "cannot derive project name from path".to_string())?;
+    let commit = git_output(&root, ["rev-parse", "HEAD"])?;
+
+    project::init_project(&root, &name)?;
+    let database = root.join(".mycelia").join("db").join("index.sqlite3");
+    let index_report = mycelia_core::index_corpus(&root, &database).map_err(|e| e.to_string())?;
+
+    if !lexical {
+        let mut provider = prepare_embedding_provider(&database)?;
+        let _ = mycelia_core::refresh_embeddings(&database, &mut provider)
+            .map_err(|e| e.to_string())?;
+    }
+
+    let _ = mycelia_core::corpus_status(&database).map_err(|e| e.to_string())?;
+
+    let schema_version = mycelia_core::schema_version();
+    let extractor_versions = mycelia_core::extractor_versions()
+        .iter()
+        .map(|version| (*version).to_string())
+        .collect::<Vec<_>>();
+    let extractor_hash = hash_text(extractor_versions.join("\n").as_str());
+    let project_config = root.join(".mycelia").join("config.toml");
+    let project_config_hash = hash_file(&project_config)?;
+    let cache_key = format!(
+        "mycelia-{}-schema{schema_version}-extractors{extractor_hash}-config{project_config_hash}-commit{commit}",
+        env!("CARGO_PKG_VERSION")
+    );
+
+    let github_env_written = write_github_env(&root, &database, &cache_key, &commit)?;
+    let report = CiPrepareReport {
+        project_root: root,
+        database,
+        cache_key,
+        git_commit: commit,
+        schema_version,
+        extractor_versions,
+        project_config_hash,
+        extractor_hash,
+        lexical,
+        chunks_written: index_report.chunks_written,
+        files_indexed: index_report.indexed,
+        files_removed: index_report.removed,
+        files_rejected: index_report.rejected,
+        github_env_written,
+    };
+
+    emit_output(if json {
+        serde_json::to_string(&report).map_err(|e| e.to_string())?
+    } else {
+        format_ci_prepare_report(&report)
+    });
+    Ok(())
+}
+
+fn resolve_git_root(path: Option<PathBuf>) -> Result<PathBuf> {
+    let root = match path {
+        Some(path) => path
+            .canonicalize()
+            .map_err(|e| format!("invalid path {}: {e}", path.display()))?,
+        None => {
+            let cwd = std::env::current_dir()
+                .map_err(|e| format!("cannot determine current directory: {e}"))?;
+            profile::git_root(&cwd)
+                .ok_or_else(|| "not in a git repository; provide an explicit path".to_string())?
+        }
+    };
+
+    if !root.is_dir() {
+        return Err(format!(
+            "project root is not a directory: {}",
+            root.display()
+        ));
+    }
+    Ok(root)
+}
+
+fn git_output<const N: usize>(root: &Path, args: [&str; N]) -> Result<String> {
+    let output = ProcessCommand::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "failed to resolve git commit for {}: {}",
+            root.display(),
+            stderr.trim()
+        ));
+    }
+    Ok(String::from_utf8(output.stdout)
+        .map_err(|e| format!("git output was not UTF-8: {e}"))?
+        .trim()
+        .to_string())
+}
+
+fn hash_file(path: &Path) -> Result<String> {
+    let bytes = fs::read(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    Ok(blake3::hash(bytes.as_slice()).to_hex().to_string())
+}
+
+fn hash_text(text: &str) -> String {
+    blake3::hash(text.as_bytes()).to_hex().to_string()
+}
+
+fn write_github_env(
+    root: &Path,
+    database: &Path,
+    cache_key: &str,
+    commit: &str,
+) -> Result<Option<PathBuf>> {
+    let Some(path) = std::env::var_os("GITHUB_ENV").map(PathBuf::from) else {
+        return Ok(None);
+    };
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("failed to open GITHUB_ENV {}: {e}", path.display()))?;
+
+    use std::io::Write;
+    writeln!(file, "MYCELIA_PROJECT_ROOT={}", root.display())
+        .map_err(|e| format!("failed to write GITHUB_ENV: {e}"))?;
+    writeln!(file, "MYCELIA_DATABASE={}", database.display())
+        .map_err(|e| format!("failed to write GITHUB_ENV: {e}"))?;
+    writeln!(file, "MYCELIA_CACHE_KEY={cache_key}")
+        .map_err(|e| format!("failed to write GITHUB_ENV: {e}"))?;
+    writeln!(file, "MYCELIA_GIT_COMMIT={commit}")
+        .map_err(|e| format!("failed to write GITHUB_ENV: {e}"))?;
+    writeln!(
+        file,
+        "MYCELIA_SCHEMA_VERSION={}",
+        mycelia_core::schema_version()
+    )
+    .map_err(|e| format!("failed to write GITHUB_ENV: {e}"))?;
+
+    Ok(Some(path))
+}
+
+fn format_ci_prepare_report(report: &CiPrepareReport) -> String {
+    let mode = if report.lexical {
+        "lexical-only"
+    } else {
+        "embedded"
+    };
+    format!(
+        "project_root: {root}\n\
+         database: {database}\n\
+         git_commit: {commit}\n\
+         cache_key: {cache_key}\n\
+         schema_version: {schema_version}\n\
+         extractors: {extractors}\n\
+         mode: {mode}\n\
+         indexed: {chunks} chunks from {files} files ({removed} removed, {rejected} rejected)\n\
+         env: {env_status}",
+        root = report.project_root.display(),
+        database = report.database.display(),
+        commit = report.git_commit,
+        cache_key = report.cache_key,
+        schema_version = report.schema_version,
+        extractors = report.extractor_versions.join(","),
+        chunks = report.chunks_written,
+        files = report.files_indexed,
+        removed = report.files_removed,
+        rejected = report.files_rejected,
+        env_status = report
+            .github_env_written
+            .as_ref()
+            .map(|path| format!("wrote {}", path.display()))
+            .unwrap_or_else(|| "GITHUB_ENV not set".to_string())
+    )
 }
 
 fn prepare_embedding_provider(database: &Path) -> Result<semantic::FastEmbedProvider> {

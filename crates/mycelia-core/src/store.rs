@@ -15,7 +15,7 @@ const MIGRATION_002: &str = include_str!("../migrations/002_fts5.sql");
 const MIGRATION_003: &str = include_str!("../migrations/003_embeddings.sql");
 const MIGRATION_004: &str = include_str!("../migrations/004_source_extractor.sql");
 const MIGRATION_005: &str = include_str!("../migrations/005_graph_edges.sql");
-const LATEST_SCHEMA_VERSION: i64 = 5;
+pub(crate) const LATEST_SCHEMA_VERSION: i64 = 5;
 
 /// A stored embedding with the cheap keys needed to rank it, but without the
 /// chunk body. Bodies are hydrated only for the ranked winners.

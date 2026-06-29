@@ -23,7 +23,7 @@ pub(crate) fn discover(root: &Path) -> Result<Discovery> {
         .git_global(false)
         .ignore(true)
         .parents(true)
-        .filter_entry(|entry| !contains_vcs_metadata(entry.path()));
+        .filter_entry(|entry| !contains_internal_metadata(entry.path()));
 
     let mut files = Vec::new();
     let mut rejected = 0;
@@ -64,12 +64,12 @@ fn is_evaluation_manifest(path: &Path) -> bool {
     false
 }
 
-fn contains_vcs_metadata(path: &Path) -> bool {
+fn contains_internal_metadata(path: &Path) -> bool {
     path.components().any(|component| {
         matches!(
             component,
             Component::Normal(name)
-                if name == ".git" || name == ".hg" || name == ".svn"
+                if name == ".git" || name == ".hg" || name == ".svn" || name == ".mycelia"
         )
     })
 }
@@ -101,6 +101,14 @@ mod tests {
         fs::write(directory.path().join("fixtures/smoke/v1.json"), "{}").expect("write smoke json");
         fs::create_dir(directory.path().join(".git")).expect("create git metadata");
         fs::write(directory.path().join(".git/config"), "secret").expect("write git config");
+        fs::create_dir_all(directory.path().join(".mycelia/db")).expect("create mycelia state");
+        fs::write(directory.path().join(".mycelia/AGENTS.md"), "internal")
+            .expect("write mycelia guidance");
+        fs::write(
+            directory.path().join(".mycelia/db/index.sqlite3"),
+            "internal",
+        )
+        .expect("write mycelia database");
 
         let discovery = discover(directory.path()).expect("discover");
         let relative: Vec<_> = discovery
