@@ -472,57 +472,98 @@ pub(crate) fn blast_radius(
     symbols.sort();
     symbols.dedup();
 
-    // --- 3. Expand callers and callees for each changed symbol (score 0.5) ---
-    // Insert a caller/callee at score 1.0, but only when it is NOT already
-    // present as a changed-path chunk (score 0.5).  Changed-path chunks that
-    // happen to also call a changed symbol keep their score=0.5 — the agent
-    // already has them from the diff and upgrading them would crowd out the
-    // genuinely new cross-file callers.
-    let insert_related = |by_id: &mut BTreeMap<String, SearchHeader>, hit: RelatedHit| {
-        by_id
-            .entry(hit.definition.chunk_id.clone())
-            .or_insert_with(|| {
-                let mut h = hit.definition.clone();
-                h.score = 1.0;
-                h
-            });
-    };
-    for symbol in &symbols {
-        for hit in relationship_callers(&connection, symbol)? {
-            insert_related(&mut by_id, hit);
-        }
-        for hit in relationship_callees(&connection, symbol)? {
-            insert_related(&mut by_id, hit);
-        }
-    }
-
-    // --- 4. De-dup callers/callees to one chunk per unique source file ---
-    // For cross-file impact analysis the agent needs to know WHICH files to
-    // review, not every chunk within those files.  Collect the lowest-byte_start
-    // chunk from each caller/callee file so the caller group stays compact.
+    // --- 3. Find cross-file callers and callees and score by graph relevance ---
+    // Rank direct cross-file interactions by the number of call edges connecting
+    // them to the changed paths, representing each file by its lowest-byte_start chunk.
     let changed_path_set: BTreeSet<&str> = changed_paths.iter().map(String::as_str).collect();
-    {
-        // For each caller/callee source_path (score 1.0, not in changed_paths)
-        // find the chunk with the lowest byte_start.
-        let mut best: BTreeMap<String, (usize, String)> = BTreeMap::new(); // path → (byte_start, id)
-        for (id, header) in &by_id {
-            if header.score >= 1.0 && !changed_path_set.contains(header.source_path.as_str()) {
-                let entry = best
-                    .entry(header.source_path.clone())
-                    .or_insert((usize::MAX, id.clone()));
-                if header.span.byte_start < entry.0 {
-                    *entry = (header.span.byte_start, id.clone());
+    let mut file_edge_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut best_chunk_by_file: BTreeMap<String, ChunkRecord> = BTreeMap::new();
+
+    // Callers of symbols defined in changed paths
+    for symbol in &symbols {
+        if symbol == "tests" {
+            continue;
+        }
+        let sql = format!(
+            "SELECT {CHUNK_COLUMNS_PREFIXED} \
+             FROM edges \
+             JOIN chunks ON chunks.id = edges.src_chunk_id \
+             WHERE edges.dst_symbol = ?1 AND edges.edge_type = ?2"
+        );
+        let mut stmt = connection.prepare(&sql)?;
+        let rows = stmt.query_map(
+            rusqlite::params![symbol, EDGE_TYPE_CALLS],
+            chunk_record_from_row,
+        )?;
+        for row in rows {
+            let chunk = row?;
+            if !changed_path_set.contains(chunk.source_path.as_str()) {
+                *file_edge_counts
+                    .entry(chunk.source_path.clone())
+                    .or_insert(0) += 1;
+                let entry = best_chunk_by_file.entry(chunk.source_path.clone());
+                match entry {
+                    std::collections::btree_map::Entry::Vacant(v) => {
+                        v.insert(chunk);
+                    }
+                    std::collections::btree_map::Entry::Occupied(mut o) => {
+                        if chunk.span.byte_start < o.get().span.byte_start {
+                            o.insert(chunk);
+                        }
+                    }
                 }
             }
         }
-        let keep: BTreeSet<String> = best.into_values().map(|(_, id)| id).collect();
-        by_id.retain(|id, header| {
-            if header.score >= 1.0 && !changed_path_set.contains(header.source_path.as_str()) {
-                keep.contains(id)
-            } else {
-                true
+    }
+
+    // Outgoing callees called from inside changed paths
+    for batch in changed_paths.chunks(500) {
+        let placeholders = vec!["?"; batch.len()].join(", ");
+        let sql = format!(
+            "SELECT edges.dst_symbol, COUNT(*) \
+             FROM edges \
+             JOIN chunks ON chunks.id = edges.src_chunk_id \
+             WHERE chunks.source_path IN ({placeholders}) \
+               AND (chunks.symbol IS NULL OR chunks.symbol != 'tests') \
+               AND edges.edge_type = '{EDGE_TYPE_CALLS}' \
+             GROUP BY edges.dst_symbol"
+        );
+        let mut stmt = connection.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(batch), |row| {
+            Ok((row.get::<_, String>(0)?, row_i64_to_usize(row, 1)?))
+        })?;
+        let callee_counts: Vec<(String, usize)> = rows.collect::<rusqlite::Result<_>>()?;
+        for (dst_symbol, count) in callee_counts {
+            let def_sql = format!("SELECT {CHUNK_COLUMNS_PREFIXED} FROM chunks WHERE symbol = ?1");
+            let mut def_stmt = connection.prepare(&def_sql)?;
+            let def_rows = def_stmt.query_map([&dst_symbol], chunk_record_from_row)?;
+            for def_row in def_rows {
+                let chunk = def_row?;
+                if !changed_path_set.contains(chunk.source_path.as_str()) {
+                    *file_edge_counts
+                        .entry(chunk.source_path.clone())
+                        .or_insert(0) += count;
+                    let entry = best_chunk_by_file.entry(chunk.source_path.clone());
+                    match entry {
+                        std::collections::btree_map::Entry::Vacant(v) => {
+                            v.insert(chunk);
+                        }
+                        std::collections::btree_map::Entry::Occupied(mut o) => {
+                            if chunk.span.byte_start < o.get().span.byte_start {
+                                o.insert(chunk);
+                            }
+                        }
+                    }
+                }
             }
-        });
+        }
+    }
+
+    // --- 4. Insert cross-file representatives into by_id scored by graph relevance ---
+    for (file_path, chunk) in best_chunk_by_file {
+        let count = file_edge_counts.get(&file_path).copied().unwrap_or(1);
+        let score = 1.0 + (count.saturating_sub(1) as f64 * 0.001);
+        by_id.insert(chunk.id.clone(), SearchHeader::from_record(&chunk, score));
     }
 
     // --- 5. Sort: callers/callees (score 1.0) first by source_path/line,

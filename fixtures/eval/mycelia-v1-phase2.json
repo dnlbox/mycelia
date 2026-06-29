@@ -1,5 +1,5 @@
 {
-  "limit": 20,
+  "limit": 5,
   "cases": [
     {
       "name": "extraction entrypoint — callers in store",
