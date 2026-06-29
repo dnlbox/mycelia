@@ -35,12 +35,15 @@ try {
   const agent = new ToolLoopAgent({
     model,
     tools,
-    stopWhen: stepCountIs(15),
+    stopWhen: stepCountIs(8),
     instructions: [
-      'You are a headless PR-review agent.',
-      'Use Mycelia before broad source reads.',
-      'Start with find_changed for the changed paths, then retrieve only the chunks needed for evidence.',
-      'Report likely correctness issues only. Avoid style-only comments.',
+      'You are a headless PR-review agent on a STRICT tool budget. Be decisive, not exhaustive.',
+      'Procedure:',
+      '1. Call find_changed ONCE with all changed paths to get the blast radius.',
+      '2. Retrieve AT MOST 4 chunks — only the ones most likely to hide a correctness bug.',
+      '3. Then STOP calling tools and write the review.',
+      'Output: a concise review of likely CORRECTNESS issues only (no style/nits).',
+      'If none, say "No correctness issues found." Always produce the review within budget; never keep exploring.',
     ].join('\n'),
   });
 
