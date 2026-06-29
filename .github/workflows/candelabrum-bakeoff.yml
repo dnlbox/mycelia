@@ -1,0 +1,55 @@
+name: Candelabrum Studio Bakeoff
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'AI Gateway Model ID for scored run'
+        required: false
+        default: 'anthropic/claude-haiku-4-5'
+      target_repo:
+        description: 'Target repository URL'
+        required: false
+        default: 'https://github.com/earlgreylabs/candelabrum-studio.git'
+
+jobs:
+  bakeoff:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: .mycelia/
+          key: mycelia-bakeoff-${{ runner.os }}-${{ github.sha }}
+          restore-keys: mycelia-bakeoff-${{ runner.os }}-
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: examples/ai-sdk/package-lock.json
+
+      - run: cargo install --locked --path crates/mycelia-cli
+
+      - run: npm ci
+        working-directory: examples/ai-sdk
+
+      - name: Run Bakeoff Suite
+        env:
+          AI_GATEWAY_MODEL: ${{ inputs.model || vars.AI_GATEWAY_MODEL || 'anthropic/claude-haiku-4-5' }}
+          TARGET_REPO_URL: ${{ inputs.target_repo || 'https://github.com/earlgreylabs/candelabrum-studio.git' }}
+        run: |
+          node benchmark/run-bakeoff.mjs > "$RUNNER_TEMP/bakeoff-report.json"
+          cat "$RUNNER_TEMP/bakeoff-report.json"
+
+      - name: Upload Bakeoff Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bakeoff-report
+          path: ${{ runner.temp }}/bakeoff-report.json
