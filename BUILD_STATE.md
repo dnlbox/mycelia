@@ -5,8 +5,8 @@ Working memory for the looping build agent. **Read first, update last, every sli
 ## Position
 
 - **Phase:** 4 — The proof (PR-review bakeoff, ship gate)
-- **Slice:** not started
-- **Status:** GO/NO-GO 3 GREEN (lead-reviewed 2026-06-29; live model-backed E2E run). Phase 4 ready to begin. Residuals carried into Phase 4 — see gate-3 lead-review note.
+- **Slice:** Phase 4 / Slice 1 (baseline arm + model parameterization)
+- **Status:** Phase 4 items 2 & 3 complete (baseline arm in review-agent.mjs via MYCELIA_DISABLE=1, parameterized AI_GATEWAY_MODEL with free tier default in workflow & script). Proceeding to item 4 (candelabrum-studio workflow & bakeoff runner).
 - **Tree:** green (2026-06-29: 99 core + 28 CLI-unit + 33 CLI integration, 0 fail)
 
 ## Next up
@@ -71,6 +71,7 @@ Residual (a) AI Gateway routing is CLOSED (verified with shipped agent). This ph
 
 ## Done log (append-only, terse — newest last)
 
+- 2026-06-29 — Phase 4 / Slice 1: implemented no-Mycelia baseline arm (`MYCELIA_DISABLE=1`) in `examples/ai-sdk/review-agent.mjs` providing `read_file` and `grep_search` AI SDK tools under a strict 5-call budget. Parameterized `AI_GATEWAY_MODEL` defaulting to free-tier `anthropic/claude-haiku-4-5` across script and `.github/workflows/mycelia-review.yml`, and added `workflow_dispatch` inputs for manual triggers and baseline comparison runs. Validation: fmt ok; clippy ok; workspace tests ok (99 core + 28 CLI-unit + 33 CLI integration, 0 fail); release build ok; install ok; smoke:mcp ok; paired eval ok (5/5 hits, MRR 0.5 vs 0.4 baseline, 584.0 vs 35,391.5 tokens/answer, 98.35% reduction).
 - 2026-06-29 — Phase 3 / AI SDK 7.0 integration: added pinned `examples/ai-sdk` package (`ai@7.0.6`, `@ai-sdk/mcp@2.0.3`, `zod@4.2.1`), no-model `smoke-mcp.mjs`, reference `review-agent.mjs` (`ToolLoopAgent`, AI Gateway model string, `stopWhen: stepCountIs(15)`), and `.github/workflows/mycelia-review.yml` (checkout, cache, Node 22, `mycelia ci prepare --no-embed`, run agent, post PR comment). Synced README, vision, architecture, generated `.mycelia/AGENTS.md` guidance, and stale six-tool references to include `find_changed`. Mechanical clippy fixes for prior Phase 2 tests (`is_some_and`, wait after kill). Validation: npm ci ok; AI SDK MCP smoke ok (`tools=7`, `inputSchema=true`, `find` hit `src/review.ts`); fmt ok; clippy ok; workspace tests ok (99 core + 28 CLI-unit + 33 CLI integration, 0 fail); release build ok; install ok; CLI smoke ok; paired eval ok (5/5 hits, MRR 0.8, 1,229.2 vs 35,492.25 tokens/answer, 96.54% reduction); stats recorded. Stopped at GO/NO-GO 3 for lead review.
 - 2026-06-29 — Phase 2 / Rework: relevance-ranked `blast_radius` output by graph connection count (number of call edges from/to changed symbols), deduplicating cross-file hits to one lowest-byte_start chunk per file. Updated `fixtures/eval/mycelia-v1-phase2.json` to `limit: 5`. Validation: fmt ok; clippy ok; workspace tests ok (99 core + 28 CLI-unit + 33 CLI integration, 0 fail); release build ok; install ok; paired eval at limit 5 ok (`hit_rate=1.0` vs `0.8`, `MRR=0.5` vs `0.4`, `tokens_per_answer=584` vs `35,394`); MCP smoke ok. Stopped at GO/NO-GO 2 for lead review.
 - 2026-06-29 — v1 reset: docs + roadmap + build-loop established; engine inherited from `main` (tree-sitter chunking for Rust/TS/TSX/Python/Ruby, SQLite schema v5, deterministic chunk IDs, freshness, read-only MCP, Rust calls graph). Nothing built against the v1 roadmap yet.

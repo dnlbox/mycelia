@@ -2,6 +2,16 @@ name: Mycelia Review Agent
 
 on:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'AI Gateway Model ID'
+        required: false
+        default: 'anthropic/claude-haiku-4-5'
+      disable_mycelia:
+        description: 'Set to 1 to run baseline arm (no Mycelia)'
+        required: false
+        default: '0'
 
 jobs:
   review:
@@ -45,7 +55,8 @@ jobs:
         env:
           MYCELIA_PROJECT_ROOT: ${{ github.workspace }}
           MYCELIA_CHANGED_PATHS: ${{ runner.temp }}/mycelia-changed-paths.txt
-          AI_GATEWAY_MODEL: anthropic/claude-sonnet-4-5
+          AI_GATEWAY_MODEL: ${{ inputs.model || vars.AI_GATEWAY_MODEL || 'anthropic/claude-haiku-4-5' }}
+          MYCELIA_DISABLE: ${{ inputs.disable_mycelia || '0' }}
         run: node review-agent.mjs > "$RUNNER_TEMP/mycelia-review.md"
 
       - name: Post review comment
