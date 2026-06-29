@@ -181,6 +181,19 @@ pub fn find_relationships(
     store::find_relationships(database, symbol, direction)
 }
 
+/// Returns headers for every chunk in `changed_paths` plus the callers and
+/// callees of every named symbol those paths define — the blast radius of a
+/// diff or PR. Deduplicates by chunk id; changed-path chunks score 1.0,
+/// callers/callees score 0.5. Sorted by source_path then line, capped at
+/// `limit`.
+pub fn blast_radius(
+    database: &Path,
+    changed_paths: &[String],
+    limit: usize,
+) -> Result<Vec<SearchHeader>> {
+    store::blast_radius(database, changed_paths, limit)
+}
+
 /// Reports which of the given source paths have drifted from the index on disk
 /// (changed, removed, unreadable, or unbacked). Pure read: a caller validates the
 /// sources behind a result set, then self-heals the drifted ones before trusting

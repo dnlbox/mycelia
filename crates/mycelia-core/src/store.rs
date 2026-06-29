@@ -416,6 +416,88 @@ fn relationship_callees(connection: &Connection, symbol: &str) -> Result<Vec<Rel
     Ok(hits)
 }
 
+/// Returns headers for every chunk in `changed_paths` plus the callers and
+/// callees of every named symbol those paths define — the "blast radius" of a
+/// diff. Deduplicates by chunk id. Changed-path chunks score 1.0; callers /
+/// callees outside the changed set score 0.5. Sorted by source_path then
+/// line_start, capped at `limit`.
+pub(crate) fn blast_radius(
+    database: &Path,
+    changed_paths: &[String],
+    limit: usize,
+) -> Result<Vec<SearchHeader>> {
+    if changed_paths.is_empty() || limit == 0 {
+        return Ok(Vec::new());
+    }
+    let connection = open_database(database, Access::ReadOnly)?;
+
+    // --- 1. Collect headers for chunks in the changed paths (score 1.0) ---
+    let mut by_id: BTreeMap<String, SearchHeader> = BTreeMap::new();
+    for batch in changed_paths.chunks(500) {
+        let placeholders = vec!["?"; batch.len()].join(", ");
+        let sql = format!(
+            "SELECT id, source_path, source_hash, byte_start, byte_end, \
+             line_start, line_end, text, extractor, symbol \
+             FROM chunks WHERE source_path IN ({placeholders}) \
+             ORDER BY source_path ASC, byte_start ASC"
+        );
+        let mut stmt = connection.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(batch), chunk_record_from_row)?;
+        for row in rows {
+            let record = row?;
+            by_id
+                .entry(record.id.clone())
+                .or_insert_with(|| SearchHeader::from_record(&record, 1.0));
+        }
+    }
+
+    // --- 2. Collect unique symbols defined in the changed paths ---
+    let mut symbols: Vec<String> = Vec::new();
+    for batch in changed_paths.chunks(500) {
+        let placeholders = vec!["?"; batch.len()].join(", ");
+        let sql = format!(
+            "SELECT DISTINCT symbol FROM chunks \
+             WHERE source_path IN ({placeholders}) AND symbol IS NOT NULL"
+        );
+        let mut stmt = connection.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(batch), |row| row.get(0))?;
+        for row in rows {
+            symbols.push(row?);
+        }
+    }
+    symbols.sort();
+    symbols.dedup();
+
+    // --- 3. Expand callers and callees for each changed symbol (score 0.5) ---
+    let insert_related = |by_id: &mut BTreeMap<String, SearchHeader>, hit: RelatedHit| {
+        by_id
+            .entry(hit.definition.chunk_id.clone())
+            .or_insert_with(|| {
+                let mut h = hit.definition;
+                h.score = 0.5;
+                h
+            });
+    };
+    for symbol in &symbols {
+        for hit in relationship_callers(&connection, symbol)? {
+            insert_related(&mut by_id, hit);
+        }
+        for hit in relationship_callees(&connection, symbol)? {
+            insert_related(&mut by_id, hit);
+        }
+    }
+
+    // --- 4. Sort by path then line, cap at limit ---
+    let mut result: Vec<SearchHeader> = by_id.into_values().collect();
+    result.sort_by(|a, b| {
+        a.source_path
+            .cmp(&b.source_path)
+            .then(a.span.line_start.cmp(&b.span.line_start))
+    });
+    result.truncate(limit);
+    Ok(result)
+}
+
 fn symbol_definition_count(connection: &Connection, symbol: &str) -> Result<usize> {
     let count: i64 = connection.query_row(
         "SELECT COUNT(*) FROM chunks WHERE symbol = ?1",
@@ -2642,5 +2724,73 @@ mod tests {
             find(database.as_path(), "---", 10, RetrievalStrategy::Fts5),
             Err(Error::NoSearchTerms)
         ));
+    }
+
+    // blast_radius: changed-path chunks + cross-file callers / callees
+    #[test]
+    fn blast_radius_returns_changed_and_related_chunks() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("corpus");
+        // helper.rs defines `helper` (changed file) and `stable`.
+        write_text_file(
+            root.join("helper.rs").as_path(),
+            "pub fn helper() -> i32 { 42 }\n\npub fn stable() -> bool { true }\n",
+        );
+        // caller.rs is NOT in changed_paths — it calls `helper` from another file.
+        write_text_file(
+            root.join("caller.rs").as_path(),
+            "fn run() -> i32 { helper() }\n",
+        );
+        let database = temp.path().join("mycelia.sqlite3");
+        index_corpus(root.as_path(), database.as_path()).expect("index");
+
+        let changed_paths = vec!["helper.rs".to_owned()];
+        let result = blast_radius(database.as_path(), &changed_paths, 20).expect("blast_radius");
+
+        // Changed-path chunks: `helper` and `stable`.
+        let changed: Vec<&str> = result
+            .iter()
+            .filter(|h| h.source_path == "helper.rs")
+            .filter_map(|h| h.signature.as_deref())
+            .collect();
+        assert!(
+            changed.iter().any(|s| s.contains("helper")),
+            "expected helper.rs chunks in result; got {changed:?}"
+        );
+        // Caller chunk: `run` in caller.rs calls `helper`.
+        let caller_paths: Vec<&str> = result.iter().map(|h| h.source_path.as_str()).collect();
+        assert!(
+            caller_paths.contains(&"caller.rs"),
+            "expected caller.rs in blast radius; got {caller_paths:?}"
+        );
+        // Changed-path chunks score 1.0; blast-radius chunks score 0.5.
+        let helper_score = result
+            .iter()
+            .find(|h| {
+                h.source_path == "helper.rs"
+                    && h.signature
+                        .as_deref()
+                        .map_or(false, |s| s.contains("fn helper"))
+            })
+            .map(|h| h.score)
+            .expect("helper chunk");
+        assert_eq!(helper_score, 1.0, "changed-path chunk must score 1.0");
+        let caller_score = result
+            .iter()
+            .find(|h| h.source_path == "caller.rs")
+            .map(|h| h.score)
+            .expect("caller chunk");
+        assert_eq!(caller_score, 0.5, "blast-radius chunk must score 0.5");
+    }
+
+    #[test]
+    fn blast_radius_returns_empty_for_empty_paths() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("corpus");
+        write_text_file(root.join("lib.rs").as_path(), "fn foo() {}\n");
+        let database = temp.path().join("mycelia.sqlite3");
+        index_corpus(root.as_path(), database.as_path()).expect("index");
+        let result = blast_radius(database.as_path(), &[], 10).expect("blast_radius empty");
+        assert!(result.is_empty());
     }
 }

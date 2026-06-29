@@ -84,6 +84,13 @@ impl CorpusLogger {
         ));
     }
 
+    pub(crate) fn log_find_changed(&self, paths_count: usize, results: usize) {
+        self.write_line(format!(
+            "{}  find_changed paths={paths_count}  results={results}",
+            now(),
+        ));
+    }
+
     pub(crate) fn log_list_corpora(&self, count: usize) {
         self.write_line(format!("{}  list_corpora count={count}", now()));
     }

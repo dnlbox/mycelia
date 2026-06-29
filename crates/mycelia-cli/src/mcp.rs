@@ -61,6 +61,23 @@ struct FindRelatedRequest {
     corpus: Option<String>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct FindChangedRequest {
+    #[schemars(
+        description = "Relative file paths changed in this PR or commit (as returned by \
+                       `git diff --name-only`). Each path must be relative to the corpus root."
+    )]
+    paths: Vec<String>,
+    #[serde(default = "default_limit")]
+    #[schemars(description = "Maximum number of sourced headers to return (default 10)")]
+    limit: usize,
+    #[serde(default)]
+    #[schemars(
+        description = "Optional corpus name. Use only when the user explicitly names another project."
+    )]
+    corpus: Option<String>,
+}
+
 const SERVER_INSTRUCTIONS: &str = "Mycelia is the token-efficient way to read this project, and it is a loop, not a one-time step. Throughout a task, whenever you need to locate or read code (where something is implemented, what supports a feature, which symbol defines behavior, or what a function or file actually contains), call find to locate the chunks, then call retrieve on the ids you want to read. retrieve returns the verified current source and is the preferred way to read located code; prefer it over opening a file by hand, since a hand-picked path or line range can be stale. Pass corpus only when the user explicitly names another project. Use shell grep and read for editing, exact-string or single-line lookups, generated files, and when Mycelia missed, not as the default way to read code you just found.";
 
 #[derive(Clone)]
@@ -487,6 +504,47 @@ impl MyceliaServer {
             logger.log_find_related(&request.symbol, direction.as_str(), hits.len());
         }
         let value = related_json(&hits, direction, &request.symbol, resolved.name.as_deref());
+        serde_json::to_string(&value).map_err(|error| error.to_string())
+    }
+
+    #[tool(
+        description = "Change-scoped codebase orientation for a PR or commit diff. Given the \
+        changed file paths (relative to the corpus root, as from `git diff --name-only`), returns \
+        headers for every chunk in those files plus their callers and callees — the blast radius. \
+        Use as the first call when reviewing a PR or explaining what a change affects. Returns the \
+        same lean header format as find (paths, line ranges, signatures). Pass corpus only when \
+        the user names another project."
+    )]
+    fn find_changed(
+        &self,
+        Parameters(request): Parameters<FindChangedRequest>,
+    ) -> McpToolResult<String> {
+        let detail = format!("paths={}", request.paths.len());
+        let resolved = match self.resolve_corpus(request.corpus.as_deref()) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                if let Some(logger) = self.ambient_logger() {
+                    logger.log_error("find_changed", &detail, error.summary());
+                }
+                return resolve_failure_json(self, error);
+            }
+        };
+        let headers =
+            match mycelia_core::blast_radius(&resolved.database, &request.paths, request.limit)
+                .map_err(|error| error.to_string())
+            {
+                Ok(headers) => headers,
+                Err(error) => {
+                    if let Some(logger) = self.logger_for(&resolved) {
+                        logger.log_error("find_changed", &detail, &error);
+                    }
+                    return Err(error);
+                }
+            };
+        if let Some(logger) = self.logger_for(&resolved) {
+            logger.log_find_changed(request.paths.len(), headers.len());
+        }
+        let value = headers_json(&headers, resolved.name.as_deref());
         serde_json::to_string(&value).map_err(|error| error.to_string())
     }
 

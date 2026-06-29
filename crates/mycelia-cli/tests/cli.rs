@@ -1933,3 +1933,111 @@ fn ci_artifact_repeated_prepare_on_same_commit_is_byte_identical() {
         "manifest source_root_hash differs"
     );
 }
+
+// Phase 2 / Slice 2: find_changed MCP tool surfaces changed-path chunks and
+// cross-file callers from the blast radius.
+#[test]
+fn stdio_mcp_find_changed_returns_blast_radius() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path().join("corpus");
+    let config_home = temp.path().join("config");
+    let data_home = temp.path().join("data");
+    fs::create_dir_all(&root).expect("root");
+
+    // helper.ts defines `formatHelper` (the "changed" file).
+    write_file(
+        &root.join("helper.ts"),
+        "export function formatHelper(x: number): string { return String(x); }\n",
+    );
+    // caller.ts calls `formatHelper` from a separate file — the blast-radius hit.
+    write_file(
+        &root.join("caller.ts"),
+        "import { formatHelper } from \"./helper\";\nexport function run(): string { return formatHelper(42); }\n",
+    );
+
+    run_success_with_homes(
+        &[
+            "setup",
+            root.to_str().expect("root"),
+            "--name",
+            "blast",
+            "--no-embed",
+        ],
+        &config_home,
+        &data_home,
+    );
+
+    let mut child = Command::new(bin_path())
+        .args(["serve", "--lexical"])
+        .env("MYCELIA_CONFIG_HOME", &config_home)
+        .env("MYCELIA_DATA_HOME", &data_home)
+        .current_dir(&root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start MCP server");
+    let mut stdin = child.stdin.take().expect("MCP stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("MCP stdout"));
+
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "0"}
+            }
+        }),
+    );
+    read_json_line(&mut stdout); // initialized
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+    );
+
+    // Call find_changed with just helper.ts as the changed path.
+    write_json_line(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "find_changed",
+                "arguments": {"paths": ["helper.ts"], "limit": 20}
+            }
+        }),
+    );
+    let result = read_json_line(&mut stdout);
+    let text = result["result"]["content"][0]["text"]
+        .as_str()
+        .expect("find_changed text");
+    let headers: Value = serde_json::from_str(text).expect("headers json");
+    let headers = headers.as_array().expect("headers array");
+
+    // helper.ts chunk must be present (the changed file itself).
+    let has_helper = headers.iter().any(|h| {
+        h["source_path"]
+            .as_str()
+            .map_or(false, |p| p == "helper.ts")
+    });
+    assert!(
+        has_helper,
+        "expected helper.ts chunk in find_changed result; got: {headers:#?}"
+    );
+
+    // caller.ts chunk must be present (the blast-radius caller of formatHelper).
+    let has_caller = headers.iter().any(|h| {
+        h["source_path"]
+            .as_str()
+            .map_or(false, |p| p == "caller.ts")
+    });
+    assert!(
+        has_caller,
+        "expected caller.ts in blast radius; got: {headers:#?}"
+    );
+
+    child.kill().ok();
+}
