@@ -11,7 +11,18 @@ Working memory for the looping build agent. **Read first, update last, every sli
 
 ## Next up
 
-Phase 4 — the ship-gate bakeoff: build a public paired benchmark (a reviewer such as PR-Agent / Claude Code Action + Mycelia vs the same reviewer alone) on real PRs with labelled findings; report token cost, false-positive rate, first-file hit rate. Ship gate decision rule in [docs/evaluation.md](docs/evaluation.md). **Carried from gate 3 (must close in Phase 4):** (a) verify AI Gateway routing with a real `vck_` key (lead to provide); (b) run the reference GitHub Action end-to-end posting a real `gh pr comment`; (c) tune the reference agent (model + `stopWhen` + instructions) to be token-lean. See [ROADMAP.md](ROADMAP.md) Phase 4.
+**Phase 4 plan (lead-scoped 2026-06-29). Decisions locked:** baseline = OUR `review-agent` with-vs-without Mycelia (controlled A/B); dataset = `github.com/earlgreylabs/candelabrum-studio` (we control it — can add CI and open/merge PRs). Ship gate decision rule in [docs/evaluation.md](docs/evaluation.md): ≥25% token reduction + no correctness regression + measurable FP improvement across ≥5 paired PRs.
+
+Build order (stop at GO/NO-GO 4 for lead review):
+
+1. **Convergence fix — VALIDATED BY LEAD, apply to [examples/ai-sdk/review-agent.mjs](examples/ai-sdk/review-agent.mjs).** Replace the instructions with a hard tool budget and lower the step cap. Validated settings: `stopWhen: stepCountIs(8)` + instruction "call find_changed ONCE; retrieve AT MOST 4 chunks; then STOP and write the review; correctness issues only; say 'No correctness issues found.' if none." Lead result on FREE-tier models (no paid budget): both `anthropic/claude-haiku-4-5` and `openai/gpt-4o-mini` converged in **5 tool calls** (find_changed + 4 retrieve) to a real review (was ~25 calls/no-converge for Haiku, ~40 retrieves for Sonnet). **Quality caveat:** bounded Haiku found NO issues on `model.rs` where unbounded Sonnet found 3 real bugs — Phase 4 must MEASURE recall, not just convergence; tune the retrieve cap to the recall/cost sweet spot.
+2. **Baseline arm:** add a no-Mycelia mode to the agent (grep/read only, or Mycelia tools disabled) for the controlled A/B.
+3. **Parameterize the workflow:** make `AI_GATEWAY_MODEL` a workflow input/var (default a free-tier model now — Sonnet 4.5 is 403-blocked on free tier; switch to Sonnet/Opus once paid/BYOK is active).
+4. **Benchmark on candelabrum-studio:** add the workflow there; create ≥5 PRs with labelled correctness issues; run paired (with/without Mycelia); record token cost, FP rate, first-file hit rate.
+5. **Close residual (b):** real GitHub Action run posting a `gh pr comment` on a candelabrum-studio PR (secret `AI_GATEWAY_API_KEY` now set on the mycelia repo; also needs it on candelabrum-studio).
+6. Re-request **GO/NO-GO 4 (SHIP)** with the paired numbers vs the decision rule.
+
+Residual (a) AI Gateway routing is CLOSED (verified with shipped agent). This phase is research/measurement-shaped, not a hands-off loop. See [ROADMAP.md](ROADMAP.md) Phase 4.
 
 ## Gate status
 
