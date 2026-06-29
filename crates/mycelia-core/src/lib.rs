@@ -9,10 +9,10 @@ mod store;
 pub use embedding::EmbeddingProvider;
 pub use error::{Error, Result};
 pub use model::{
-    Chunk, ChunkRecord, CorpusStatusReport, Direction, EdgeDraft, EmbeddingReport, EvaluationCase,
-    EvaluationCaseResult, EvaluationReport, ExpectedMatch, IndexReport, RelatedHit,
-    RetrievalStrategy, Retrieved, SearchHeader, SearchHit, SourceRefresh, SourceSpan,
-    TokenUsageReport,
+    BaselineEvaluationReport, Chunk, ChunkRecord, CorpusStatusReport, Direction, EdgeDraft,
+    EmbeddingReport, EvaluationCase, EvaluationCaseResult, EvaluationComparison, EvaluationReport,
+    ExpectedMatch, IndexReport, PairedEvaluationReport, RelatedHit, RetrievalStrategy, Retrieved,
+    SearchHeader, SearchHit, SourceRefresh, SourceSpan, TokenUsageReport,
 };
 
 use std::path::Path;
@@ -189,6 +189,24 @@ pub fn evaluate_with_strategy(
     strategy: RetrievalStrategy,
 ) -> Result<EvaluationReport> {
     evaluation::evaluate(database, cases, limit, strategy)
+}
+
+/// Evaluates a deterministic live-file grep/read baseline against the same
+/// sourced expectations as Mycelia.
+pub fn evaluate_baseline(
+    database: &Path,
+    cases: &[EvaluationCase],
+    limit: usize,
+) -> Result<BaselineEvaluationReport> {
+    evaluation::evaluate_baseline(database, cases, limit)
+}
+
+/// Pairs a Mycelia run and a grep/read baseline into one comparison artifact.
+pub fn pair_evaluation_reports(
+    mycelia: EvaluationReport,
+    baseline: BaselineEvaluationReport,
+) -> PairedEvaluationReport {
+    evaluation::pair_reports(mycelia, baseline)
 }
 
 /// Evaluates a vector or hybrid strategy using one initialized provider.

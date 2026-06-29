@@ -7,7 +7,7 @@ mod semantic;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use mycelia_core::{
     self, ChunkRecord, Direction, EmbeddingReport, EvaluationCase, EvaluationReport, IndexReport,
-    RelatedHit, RetrievalStrategy, Retrieved, SearchHeader,
+    PairedEvaluationReport, RelatedHit, RetrievalStrategy, Retrieved, SearchHeader,
 };
 use serde::Deserialize;
 use std::fs;
@@ -210,6 +210,9 @@ enum Command {
         target: AnyTarget,
         #[arg(long, value_enum, default_value_t)]
         strategy: Strategy,
+        /// Emit a paired Mycelia vs grep/read baseline report.
+        #[arg(long)]
+        paired: bool,
         #[arg(long)]
         json: bool,
     },
@@ -587,6 +590,7 @@ where
             manifest,
             target,
             strategy,
+            paired,
             json,
         } => {
             let resolved = target.resolve()?;
@@ -596,12 +600,23 @@ where
             let manifest: EvaluationManifest = serde_json::from_str(&contents)
                 .map_err(|e| format!("invalid evaluation manifest: {e}"))?;
             validate_evaluation_manifest(&manifest, &manifest_path, &resolved)?;
-            let report = eval_with_strategy(
-                &resolved.database,
-                &manifest.cases,
-                manifest.limit,
-                strategy,
-            )?;
+            if paired {
+                let report = eval_paired_with_strategy(
+                    &resolved.database,
+                    &manifest.cases,
+                    manifest.limit,
+                    strategy,
+                )?;
+                emit_output(if json {
+                    serde_json::to_string(&report).map_err(|e| e.to_string())?
+                } else {
+                    format_paired_evaluation_report(&report)
+                });
+                return Ok(());
+            }
+
+            let report =
+                eval_with_strategy(&resolved.database, &manifest.cases, manifest.limit, strategy)?;
             emit_output(if json {
                 serde_json::to_string(&report).map_err(|e| e.to_string())?
             } else {
@@ -1359,6 +1374,18 @@ fn eval_with_strategy(
     .map_err(|e| e.to_string())
 }
 
+fn eval_paired_with_strategy(
+    database: &Path,
+    cases: &[EvaluationCase],
+    limit: usize,
+    strategy: Strategy,
+) -> Result<PairedEvaluationReport> {
+    let mycelia = eval_with_strategy(database, cases, limit, strategy)?;
+    let baseline =
+        mycelia_core::evaluate_baseline(database, cases, limit).map_err(|e| e.to_string())?;
+    Ok(mycelia_core::pair_evaluation_reports(mycelia, baseline))
+}
+
 fn resolve_retrieval(database: &Path, strategy: Strategy) -> Result<Retrieval> {
     let available =
         mycelia_core::has_embeddings(database, semantic::MODEL_ID).map_err(|e| e.to_string())?;
@@ -1604,6 +1631,47 @@ fn format_evaluation_report(report: &EvaluationReport) -> String {
                 .map_or_else(|| "miss".to_owned(), |rank| format!("rank {rank}"))
         )
     }));
+    lines.join("\n")
+}
+
+fn format_paired_evaluation_report(report: &PairedEvaluationReport) -> String {
+    let mut lines = vec![
+        "mycelia:".to_owned(),
+        format!("  strategy: {}", report.mycelia.strategy),
+        format!("  hit_rate: {:.4}", report.mycelia.hit_rate),
+        format!(
+            "  mean_reciprocal_rank: {:.4}",
+            report.mycelia.mean_reciprocal_rank
+        ),
+        format!(
+            "  tokens_per_answer: {:.2}",
+            report.mycelia.token_usage.tokens_per_answer
+        ),
+        "baseline:".to_owned(),
+        format!("  name: {}", report.baseline.name),
+        format!("  hit_rate: {:.4}", report.baseline.hit_rate),
+        format!(
+            "  mean_reciprocal_rank: {:.4}",
+            report.baseline.mean_reciprocal_rank
+        ),
+        format!(
+            "  tokens_per_answer: {:.2}",
+            report.baseline.token_usage.tokens_per_answer
+        ),
+        "comparison:".to_owned(),
+        format!("  hit_rate_delta: {:.4}", report.comparison.hit_rate_delta),
+        format!(
+            "  mean_reciprocal_rank_delta: {:.4}",
+            report.comparison.mean_reciprocal_rank_delta
+        ),
+        format!(
+            "  tokens_per_answer_delta: {:.2}",
+            report.comparison.tokens_per_answer_delta
+        ),
+    ];
+    if let Some(ratio) = report.comparison.token_reduction_ratio {
+        lines.push(format!("  token_reduction_ratio: {ratio:.4}"));
+    }
     lines.join("\n")
 }
 

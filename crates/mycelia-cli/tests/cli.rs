@@ -435,6 +435,55 @@ fn eval_accepts_v1_required_files_schema() {
 }
 
 #[test]
+fn eval_paired_reports_mycelia_and_grep_read_baseline() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path().join("corpus");
+    let database = temp.path().join("mycelia.sqlite");
+    let manifest = temp.path().join("evaluation.json");
+    fs::create_dir_all(&root).expect("create corpus");
+    write_file(&root.join("src.rs"), "pub fn paired_report_contract() {}\n");
+    write_file(
+        &manifest,
+        r#"{
+          "limit": 5,
+          "cases": [{
+            "name": "paired report contract",
+            "query": "paired_report_contract",
+            "required_files": ["src.rs"]
+          }]
+        }"#,
+    );
+
+    run_success(&[
+        "index",
+        root.to_str().expect("root path"),
+        "--database",
+        database.to_str().expect("database path"),
+    ]);
+    let output = run_success(&[
+        "eval",
+        manifest.to_str().expect("manifest path"),
+        "--database",
+        database.to_str().expect("database path"),
+        "--strategy",
+        "fts5-reranked",
+        "--paired",
+        "--json",
+    ]);
+    let report: Value = serde_json::from_str(&output).expect("parse paired evaluation report");
+
+    assert_eq!(report["mycelia"]["hits"], 1);
+    assert_eq!(report["baseline"]["name"], "grep_read");
+    assert_eq!(report["baseline"]["hits"], 1);
+    assert_eq!(
+        report["baseline"]["token_usage"]["answered_queries"],
+        report["baseline"]["hits"]
+    );
+    assert!(report["comparison"]["hit_rate_delta"].is_number());
+    assert!(report["comparison"]["tokens_per_answer_delta"].is_number());
+}
+
+#[test]
 fn eval_rejects_manifest_inside_indexed_corpus() {
     let temp = TempDir::new().expect("tempdir");
     let root = temp.path().join("corpus");

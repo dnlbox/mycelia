@@ -304,6 +304,34 @@ pub struct EvaluationReport {
     pub results: Vec<EvaluationCaseResult>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct BaselineEvaluationReport {
+    pub name: String,
+    pub limit: usize,
+    pub cases: usize,
+    pub hits: usize,
+    pub hit_rate: f64,
+    pub mean_reciprocal_rank: f64,
+    pub elapsed_ms: u128,
+    pub token_usage: TokenUsageReport,
+    pub results: Vec<EvaluationCaseResult>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PairedEvaluationReport {
+    pub mycelia: EvaluationReport,
+    pub baseline: BaselineEvaluationReport,
+    pub comparison: EvaluationComparison,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct EvaluationComparison {
+    pub hit_rate_delta: f64,
+    pub mean_reciprocal_rank_delta: f64,
+    pub tokens_per_answer_delta: f64,
+    pub token_reduction_ratio: Option<f64>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct TokenUsageReport {
     pub answered_queries: usize,

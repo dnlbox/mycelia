@@ -35,6 +35,8 @@ A hit-rate gain that increases tokens-per-answer is **not a win**. The point of 
 - Compare Mycelia vs baseline (grep/read, or reviewer-alone) on the **same** prompt, repo, and time budget.
 - One session with mandatory protocol reads is not a measurement. Run controlled pairs.
 - Minimum **5 paired tasks** before any ship/no-ship decision.
+- Phase 0 uses `mycelia eval --paired` for the controlled pair. The Mycelia side runs the selected retrieval strategy; the baseline side is a deterministic live-file `grep_read` ranker over the same corpus root and the same manifest.
+- A paired report contains `mycelia`, `baseline`, and `comparison`. The comparison records hit-rate delta, MRR delta, tokens-per-answer delta, and token-reduction ratio.
 
 ## Transcript-visible tool calls only
 - Only a record showing an **actual MCP tool invocation** counts as Mycelia usage.
