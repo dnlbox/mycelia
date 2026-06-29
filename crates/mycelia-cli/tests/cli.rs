@@ -1854,3 +1854,82 @@ fn find_on_missing_database_fails_without_creating_it() {
         "read command must not create the database file"
     );
 }
+
+// R8: two independent `ci prepare` + `ci export` runs on the same commit
+// must produce byte-identical artifact DB files.
+#[test]
+fn ci_artifact_repeated_prepare_on_same_commit_is_byte_identical() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path().join("corpus");
+    fs::create_dir_all(root.join("src")).expect("src dir");
+    init_committed_git(&root);
+    write_file(
+        &root.join("src/lib.rs"),
+        "pub fn byte_identical_symbol() -> u32 { 42 }\n",
+    );
+    write_file(
+        &root.join("src/util.rs"),
+        "pub fn helper_byte_identical() -> bool { true }\n",
+    );
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-m", "initial"]);
+
+    // First prepare + export.
+    run_success(&["ci", "prepare", "--no-embed", root.to_str().expect("root")]);
+    let artifact_a = temp.path().join("artifact_a");
+    run_success(&[
+        "ci",
+        "export",
+        artifact_a.to_str().expect("artifact_a"),
+        root.to_str().expect("root"),
+    ]);
+
+    // Delete the project DB so the second prepare starts from scratch.
+    let database = root.join(".mycelia/db/index.sqlite3");
+    fs::remove_file(&database).expect("remove db for second prepare");
+
+    // Second prepare + export — same commit, same config.
+    run_success(&["ci", "prepare", "--no-embed", root.to_str().expect("root")]);
+    let artifact_b = temp.path().join("artifact_b");
+    run_success(&[
+        "ci",
+        "export",
+        artifact_b.to_str().expect("artifact_b"),
+        root.to_str().expect("root"),
+    ]);
+
+    // Both DB files must be byte-identical (R8 + R3).
+    let db_a = fs::read(artifact_a.join("db/index.sqlite3")).expect("read artifact_a db");
+    let db_b = fs::read(artifact_b.join("db/index.sqlite3")).expect("read artifact_b db");
+    assert_eq!(
+        db_a.len(),
+        db_b.len(),
+        "artifact DB sizes differ between independent prepare runs on the same commit"
+    );
+    assert_eq!(
+        db_a, db_b,
+        "artifact DB files are not byte-identical between independent prepare runs on the same commit (R8)"
+    );
+
+    // Manifest files must also match on all deterministic fields.
+    let manifest_a: Value = serde_json::from_str(
+        &fs::read_to_string(artifact_a.join("manifest.json")).expect("manifest_a"),
+    )
+    .expect("manifest_a json");
+    let manifest_b: Value = serde_json::from_str(
+        &fs::read_to_string(artifact_b.join("manifest.json")).expect("manifest_b"),
+    )
+    .expect("manifest_b json");
+    assert_eq!(
+        manifest_a["git_commit"], manifest_b["git_commit"],
+        "manifest git_commit differs"
+    );
+    assert_eq!(
+        manifest_a["cache_key"], manifest_b["cache_key"],
+        "manifest cache_key differs between prepare runs on same commit"
+    );
+    assert_eq!(
+        manifest_a["source_root_hash"], manifest_b["source_root_hash"],
+        "manifest source_root_hash differs"
+    );
+}

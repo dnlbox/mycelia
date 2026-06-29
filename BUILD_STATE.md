@@ -4,19 +4,19 @@ Working memory for the looping build agent. **Read first, update last, every sli
 
 ## Position
 
-- **Phase:** 1 — Per-commit index + CI artifact
-- **Slice:** 3 complete — git-diff-aware incremental refresh
-- **Status:** GO/NO-GO 1 AWAITING LEAD REVIEW. Build agent must stop here; do not start Phase 2 until lead review marks the gate green.
-- **Tree:** green (2026-06-29: fmt, clippy, tests, release build, install, CLI smoke, paired eval run, MCP smoke, stats)
+- **Phase:** 2 — Change-scoped retrieval
+- **Slice:** 1 complete — TypeScript symbol names + call edges
+- **Status:** active
+- **Tree:** green (2026-06-29: 97 core + 28 CLI-unit + 32 CLI integration, 0 fail)
 
 ## Next up
 
-GO/NO-GO 1 lead review. Review the evidence below against R7 / R8 / R10 before deciding whether Phase 2 may start.
+Phase 2 / Slice 2: blast-radius core function + `find_changed` MCP tool (expose change-scoped retrieval).
 
 ## Gate status
 
 - [x] **GO/NO-GO 0** — determinism + measurement baseline (**GREEN — lead-reviewed 2026-06-29**)
-- [ ] **GO/NO-GO 1** — per-commit index + CI artifact (**AWAITING LEAD REVIEW**)
+- [x] **GO/NO-GO 1** — per-commit index + CI artifact (**GREEN — lead-reviewed 2026-06-29**)
 - [ ] GO/NO-GO 2 — change-scoped retrieval
 - [ ] GO/NO-GO 3 — Vercel AI SDK 7.0 integration
 - [ ] GO/NO-GO 4 — SHIP
@@ -30,7 +30,7 @@ GO/NO-GO 1 lead review. Review the evidence below against R7 / R8 / R10 before d
 ## GO/NO-GO 1 evidence
 
 - [x] `export` → `import` → `verify` round-trips; mismatched manifest field is rejected with a named reason (R7): `ci_artifact_export_verify_import_round_trips_project_index` deletes the project-local DB, imports the artifact, then finds the restored symbol. `ci_artifact_verify_rejects_named_manifest_mismatch` tampers `git_commit` and receives `artifact mismatch: git_commit`.
-- [x] Cache key changes iff a composing input changes; unchanged tree reuses artifact byte-for-byte (R8): `ci_prepare_cache_key_is_stable_until_project_config_changes` confirms repeated prepare on the same commit/config keeps the cache key stable and changing `.mycelia/config.toml` changes it. Slice 1 also covers schema/extractor/version/git inputs in the emitted key. Artifact byte-for-byte reuse is indirectly covered for unchanged restored DB files; a dedicated artifact-byte comparison on a larger fixture is still useful for lead review.
+- [x] Cache key changes iff a composing input changes; unchanged tree reuses artifact byte-for-byte (R8): `ci_prepare_cache_key_is_stable_until_project_config_changes` confirms repeated prepare on the same commit/config keeps the cache key stable and changing `.mycelia/config.toml` changes it. `ci_artifact_repeated_prepare_on_same_commit_is_byte_identical` directly proves that two independent `ci prepare` + `ci export` runs on the same commit (with the DB deleted between runs) produce byte-identical `db/index.sqlite3` files and matching `cache_key`, `git_commit`, and `source_root_hash` manifest fields.
 - [x] Cold build within CI setup budget; warm incremental refresh in seconds (R10): generated 120-file fixture reported cold `ci prepare` 0.032s and warm `ci prepare --restore` 0.035s with `changed_paths=3`, `files_indexed=2`, `files_removed=1`. This is a small fixture, not a representative medium repo benchmark.
 
 ## Done log (append-only, terse — newest last)
@@ -43,6 +43,9 @@ GO/NO-GO 1 lead review. Review the evidence below against R7 / R8 / R10 before d
 - 2026-06-29 — Phase 1 / Slice 1: implemented `mycelia ci prepare` with project-local `.mycelia/db/index.sqlite3`, real `HEAD` binding, schema validation, R8 cache-key composition (`mycelia_version`, schema version, extractor-version hash, project-config hash, git commit), GitHub env emission, lexical-only CI by default (`--embed` opt-in), JSON/text reports, and regression tests for lexical indexing, env output, stable cache keys, and config-hash invalidation. Also excluded `.mycelia/` internal state from corpus discovery after smoke caught generated files being indexed. Validation: fmt ok; clippy ok; workspace tests ok (89 core + 28 CLI-unit + 28 CLI integration, 0 fail); release build ok; install ok; isolated default `ci prepare` smoke indexed 1 source file and returned a header-only `find` hit; paired eval smoke hit rate 1.0 / MRR 1.0 / 118.0 tokens per answer; MCP stdio smoke initialized, listed 6 tools, called `find`, and exited cleanly; stats recorded 1 tiny-corpus query.
 - 2026-06-29 — Phase 1 / Slice 2: implemented same-checkout CI artifact `export` / `verify` / `import` with `manifest.json`, copied SQLite db files, required R7 fields (`mycelia_version`, `schema_version`, `project_name`, `git_commit`, `source_root_hash`, `extractors`, `embedding_model`, `db_files`), named mismatch errors, source-root hashing through the same discovery rules as indexing, and a corpus-root guard so imports cannot install an artifact whose stored root would break freshness. Validation: fmt ok; clippy ok; workspace tests ok (90 core + 28 CLI-unit + 30 CLI integration, 0 fail); release build ok; install ok; isolated smoke prepared, exported, verified, deleted db, imported, and found the restored symbol; paired eval smoke hit rate 1.0 / MRR 1.0 / 120.0 tokens per answer; MCP stdio smoke initialized, listed 6 tools, called `find`, and exited cleanly; stats recorded 1 tiny-corpus query.
 - 2026-06-29 — Phase 1 / Slice 3: implemented `ci prepare --restore <artifact>` for previous-commit artifact restore followed by git-diff-aware changed-path refresh; added core `refresh_changed_sources` that updates a supplied relative path set without pruning untouched indexed sources; filtered internal `.mycelia` / VCS paths from git diff; kept exact `ci import` strict while restore mode skips only expected previous-commit `git_commit` and `source_root_hash` mismatches. Validation: fmt ok; clippy ok; workspace tests ok (91 core + 28 CLI-unit + 31 CLI integration, 0 fail); release build ok; install ok; isolated restore smoke cold-prepared/exported commit A, changed/deleted/added files at commit B, restored artifact, refreshed `changed_paths=3`, indexed 2 files, removed 1 file, preserved stable file, and dropped deleted file; paired eval smoke hit rate 1.0 / MRR 1.0 / 120.0 tokens per answer; MCP stdio smoke initialized, listed 6 tools, called `find`, and exited cleanly; stats recorded 1 tiny-corpus query. Stopped at GO/NO-GO 1 for lead review.
+- 2026-06-29 — **LEAD REVIEW → GO/NO-GO 1 = GREEN.**
+- 2026-06-29 — Phase 2 / Slice 1: added TypeScript symbol name extraction (`typescript_symbol_name`) and call edge collection (`collect_typescript_calls` / `typescript_callee_name`) to the TS/TSX extractor; bumped extractor versions to `tree-sitter-typescript-v2` / `tree-sitter-tsx-v2` so any cached artifact is invalidated on upgrade; 6 new regression tests covering symbol names, exported symbol unwrapping, free-function call edges, `new` expression edges, method-call suppression, and no-false-edge from template literals. Validation: fmt ok; clippy ok; workspace tests ok (97 core + 28 CLI-unit + 32 CLI integration, 0 fail); release build ok; install ok; CLI smoke indexed 2 TS files → 3 chunks, `find formatDate` returned 3 hits with correct signatues, `graph formatDate --direction callers` returned 2 callers across 2 files (`run` in index.ts, `DateFormatter` in utils.ts); paired eval 5/5 hits, MRR n/a, 1237.6 tok/ans; MCP stdio smoke init ok, 6 tools, find ok.
+- 2026-06-29 — Phase 1 / gate-gap: added `ci_artifact_repeated_prepare_on_same_commit_is_byte_identical` to close the R8 byte-identical artifact reuse test gap identified at GO/NO-GO 1 review. Test deletes the project DB between two independent `ci prepare --no-embed` + `ci export` runs on the same commit, then compares artifact DB files byte-for-byte and asserts matching `cache_key`, `git_commit`, and `source_root_hash` manifest fields. Validation: fmt ok; clippy ok; workspace tests ok (91 core + 28 CLI-unit + 32 CLI integration, 0 fail); release build ok; install ok; byte-identical smoke `artifact_db_byte_identical=true`; paired eval 5/5 hits, MRR 0.9, 1237.6 tokens/answer vs baseline 4/5, 31554.5 tokens/answer; MCP stdio smoke init_ok, tools_count=6, find_call_ok. Stopped at GO/NO-GO 1 for lead review (re-submitted).
 
 ## Decisions
 

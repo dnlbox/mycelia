@@ -4,8 +4,8 @@ use crate::{Chunk, EdgeDraft, SourceSpan};
 const MAX_CHUNK_BYTES: usize = 2_048;
 const EXTRACTOR_PLAIN: &str = "plain-text-v1";
 const EXTRACTOR_RUST: &str = "tree-sitter-rust-v1";
-const EXTRACTOR_TS: &str = "tree-sitter-typescript-v1";
-const EXTRACTOR_TSX: &str = "tree-sitter-tsx-v1";
+const EXTRACTOR_TS: &str = "tree-sitter-typescript-v2";
+const EXTRACTOR_TSX: &str = "tree-sitter-tsx-v2";
 const EXTRACTOR_PY: &str = "tree-sitter-python-v1";
 const EXTRACTOR_RUBY: &str = "tree-sitter-ruby-v1";
 pub(crate) const EXTRACTOR_VERSIONS: &[&str] = &[
@@ -322,6 +322,9 @@ fn extract_typescript(
         let byte_start = doc_byte_start;
         let byte_end = node.end_byte();
 
+        let mut edges = Vec::new();
+        collect_typescript_calls(*node, text, &line_index, &mut edges);
+
         chunks.push(Chunk {
             id: chunk_id(source_path, source_hash, byte_start, byte_end),
             source_path: source_path.to_owned(),
@@ -334,8 +337,8 @@ fn extract_typescript(
             },
             text: text[byte_start..byte_end].to_owned(),
             extractor,
-            symbol: None,
-            edges: Vec::new(),
+            symbol: typescript_symbol_name(*node, text),
+            edges,
         });
     }
 
@@ -343,6 +346,110 @@ fn extract_typescript(
         return None;
     }
     Some(chunks)
+}
+
+/// Returns the defined symbol name for a top-level TypeScript node. For
+/// `export_statement` and `ambient_declaration` wrappers, recurses into the
+/// inner declaration. `lexical_declaration` (e.g. `export const foo = …`)
+/// returns the name of the first `variable_declarator`.
+fn typescript_symbol_name(node: tree_sitter::Node<'_>, text: &str) -> Option<String> {
+    match node.kind() {
+        "function_declaration"
+        | "class_declaration"
+        | "abstract_class_declaration"
+        | "interface_declaration"
+        | "type_alias_declaration"
+        | "enum_declaration"
+        | "module" => node
+            .child_by_field_name("name")
+            .map(|n| text[n.byte_range()].to_owned()),
+        "export_statement" | "ambient_declaration" => {
+            // Try the `declaration` field first (covers `export function foo`,
+            // `export class Foo`, etc. per the tree-sitter-typescript grammar),
+            // then fall back to the first named child that looks like a
+            // declaration (handles grammar versions that use unnamed children).
+            let inner = node.child_by_field_name("declaration").or_else(|| {
+                let mut cursor = node.walk();
+                node.named_children(&mut cursor).find(|c| {
+                    matches!(
+                        c.kind(),
+                        "function_declaration"
+                            | "class_declaration"
+                            | "abstract_class_declaration"
+                            | "interface_declaration"
+                            | "type_alias_declaration"
+                            | "enum_declaration"
+                            | "module"
+                            | "lexical_declaration"
+                    )
+                })
+            })?;
+            typescript_symbol_name(inner, text)
+        }
+        "lexical_declaration" | "variable_declaration" => {
+            // export const foo = …: name lives on the variable_declarator.
+            let mut cursor = node.walk();
+            node.named_children(&mut cursor)
+                .find(|c| c.kind() == "variable_declarator")
+                .and_then(|decl| decl.child_by_field_name("name"))
+                .map(|n| text[n.byte_range()].to_owned())
+        }
+        _ => None,
+    }
+}
+
+/// Collects `calls` edges from one top-level TypeScript chunk by walking its
+/// subtree for `call_expression` and `new_expression` nodes. Only free-function
+/// calls (`foo()`) and constructor calls (`new Foo()`) where the callee is a
+/// bare `identifier` are captured. Method calls (`obj.method()`) are dropped:
+/// the receiver type is unknown and a bare method name would misresolve to an
+/// unrelated symbol — "a wrong connection is worse than none" (engine rules).
+fn collect_typescript_calls(
+    node: tree_sitter::Node<'_>,
+    text: &str,
+    line_index: &LineIndex,
+    edges: &mut Vec<EdgeDraft>,
+) {
+    let callee = match node.kind() {
+        "call_expression" => node.child_by_field_name("function"),
+        "new_expression" => node.child_by_field_name("constructor"),
+        _ => None,
+    };
+    if let Some(callee) = callee
+        && let Some((name, name_node)) = typescript_callee_name(callee, text)
+    {
+        let byte_start = name_node.start_byte();
+        let byte_end = name_node.end_byte();
+        edges.push(EdgeDraft {
+            edge_type: EDGE_TYPE_CALLS,
+            dst_symbol: name,
+            span: SourceSpan {
+                byte_start,
+                byte_end,
+                line_start: line_index.line_at_start(byte_start),
+                line_end: line_index.line_at_end(text, byte_end),
+            },
+        });
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_typescript_calls(child, text, line_index, edges);
+    }
+}
+
+/// Extracts the bare callee `identifier` and its node from the callee position
+/// of a TypeScript `call_expression` or `new_expression`. Non-identifier
+/// callees (member expressions, chains, etc.) return `None` — conservative
+/// resolution, consistent with the Rust extractor's method-call policy.
+fn typescript_callee_name<'tree>(
+    func: tree_sitter::Node<'tree>,
+    text: &str,
+) -> Option<(String, tree_sitter::Node<'tree>)> {
+    match func.kind() {
+        "identifier" => Some((text[func.byte_range()].to_owned(), func)),
+        _ => None,
+    }
 }
 
 fn extract_python(source_path: &str, source_hash: &str, text: &str) -> Option<Vec<Chunk>> {
@@ -1014,6 +1121,147 @@ export function orphan(): void {}
         let (chunks, _) = extract_text("orphan.ts", "hash", src);
         assert_eq!(chunks.len(), 1);
         assert!(chunks[0].text.starts_with("export function orphan"));
+    }
+
+    // --- TypeScript symbol names and `calls` edges ---
+
+    #[test]
+    fn typescript_chunks_carry_their_symbol_name() {
+        let src = r#"function greet(name: string): string {
+  return name;
+}
+
+class Greeter {
+  say(name: string) { return greet(name); }
+}
+
+interface Namer {
+  name(): string;
+}
+
+type Color = "red" | "blue";
+
+export enum Direction { Up, Down }
+"#;
+        let (chunks, _) = extract_text("symbols.ts", "hash", src);
+        let symbols: Vec<Option<&str>> = chunks.iter().map(|c| c.symbol.as_deref()).collect();
+        assert_eq!(
+            symbols,
+            vec![
+                Some("greet"),
+                Some("Greeter"),
+                Some("Namer"),
+                Some("Color"),
+                Some("Direction"),
+            ]
+        );
+    }
+
+    #[test]
+    fn typescript_exported_symbol_name() {
+        let src = r#"export interface RunStore {
+  save(run: Run): Promise<void>;
+}
+
+export type Status = "pending" | "running" | "done";
+
+export class Orchestrator {
+  async advance(run: Run): Promise<Run> {
+    return run;
+  }
+}
+
+export function prepare(): void {}
+"#;
+        let (chunks, _) = extract_text("store.ts", "hash", src);
+        let symbols: Vec<Option<&str>> = chunks.iter().map(|c| c.symbol.as_deref()).collect();
+        assert_eq!(
+            symbols,
+            vec![
+                Some("RunStore"),
+                Some("Status"),
+                Some("Orchestrator"),
+                Some("prepare"),
+            ]
+        );
+    }
+
+    #[test]
+    fn typescript_collects_free_function_call_edges() {
+        let src = r#"function helper(): number {
+  return 42;
+}
+
+function caller(): number {
+  return helper() + helper();
+}
+"#;
+        let (chunks, _) = extract_text("calls.ts", "hash", src);
+        let caller = chunks
+            .iter()
+            .find(|c| c.symbol.as_deref() == Some("caller"))
+            .expect("caller chunk");
+        let targets: Vec<&str> = caller.edges.iter().map(|e| e.dst_symbol.as_str()).collect();
+        // Two call sites, two edges.
+        assert_eq!(targets, vec!["helper", "helper"]);
+        assert!(
+            caller
+                .edges
+                .iter()
+                .all(|e| e.span.byte_start >= caller.span.byte_start)
+        );
+        assert_eq!(caller.edges[0].edge_type, EDGE_TYPE_CALLS);
+    }
+
+    #[test]
+    fn typescript_new_expression_is_a_call_edge() {
+        let src = r#"function build(): Widget {
+  return new Widget();
+}
+"#;
+        let (chunks, _) = extract_text("build.ts", "hash", src);
+        let targets: Vec<&str> = chunks
+            .iter()
+            .flat_map(|c| c.edges.iter())
+            .map(|e| e.dst_symbol.as_str())
+            .collect();
+        assert_eq!(targets, vec!["Widget"]);
+    }
+
+    #[test]
+    fn typescript_method_call_is_not_an_edge() {
+        // Method calls are dropped: receiver type is unknown.
+        // The free call `helper()` is still captured; `obj.process()` is not.
+        let src = r#"function run(obj: Thing): void {
+  helper();
+  obj.process();
+}
+"#;
+        let (chunks, _) = extract_text("run.ts", "hash", src);
+        let targets: Vec<&str> = chunks
+            .iter()
+            .flat_map(|c| c.edges.iter())
+            .map(|e| e.dst_symbol.as_str())
+            .collect();
+        assert_eq!(targets, vec!["helper"]);
+    }
+
+    #[test]
+    fn typescript_no_false_edge_from_string_template() {
+        // Identifiers inside string/template literals are not AST call nodes.
+        let src = r#"function run(): string {
+  const note = "ghost() is not a call";
+  const tmpl = `phantom() is also not`;
+  return note + tmpl;
+}
+"#;
+        let (chunks, _) = extract_text("run.ts", "hash", src);
+        let targets: Vec<&str> = chunks
+            .iter()
+            .flat_map(|c| c.edges.iter())
+            .map(|e| e.dst_symbol.as_str())
+            .collect();
+        assert!(targets.is_empty(), "expected no edges, got: {targets:?}");
     }
 
     // --- tree-sitter Python extractor tests ---
