@@ -1529,6 +1529,18 @@ mod tests {
         Connection::open(database).expect("open database")
     }
 
+    fn ordered_chunk_ids(database: &Path) -> Vec<String> {
+        let connection = open_database(database, Access::ReadOnly).expect("open database");
+        let mut statement = connection
+            .prepare("SELECT id FROM chunks ORDER BY source_path, byte_start, byte_end, id")
+            .expect("prepare chunk id query");
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("query chunk ids")
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .expect("collect chunk ids")
+    }
+
     #[test]
     fn indexes_first_corpus_and_creates_database_parent() {
         let temp = tempdir().expect("tempdir");
@@ -1583,6 +1595,30 @@ mod tests {
         );
         assert_eq!(source_count, 2);
         assert_eq!(chunk_count, 3);
+    }
+
+    #[test]
+    fn indexing_same_tree_twice_produces_identical_chunk_ids() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("corpus");
+        write_text_file(
+            root.join("src/lib.rs").as_path(),
+            "/// Adds two values.\npub fn add(left: i32, right: i32) -> i32 {\n    left + right\n}\n",
+        );
+        write_text_file(
+            root.join("src/review.ts").as_path(),
+            "/** Reviews a value. */\nexport function review(value: string): string {\n  return value;\n}\n",
+        );
+
+        let first_database = temp.path().join("first.sqlite3");
+        let second_database = temp.path().join("second.sqlite3");
+        crate::index_corpus(root.as_path(), first_database.as_path()).expect("first index");
+        crate::index_corpus(root.as_path(), second_database.as_path()).expect("second index");
+
+        let first_ids = ordered_chunk_ids(first_database.as_path());
+        let second_ids = ordered_chunk_ids(second_database.as_path());
+        assert!(!first_ids.is_empty(), "fixture should produce chunks");
+        assert_eq!(first_ids, second_ids);
     }
 
     #[test]

@@ -178,6 +178,40 @@ fn routed_find_without_embeddings_falls_back_to_lexical() {
 }
 
 #[test]
+fn setup_no_embed_supports_default_find_without_model_cache() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path().join("corpus");
+    let config_home = temp.path().join("config");
+    let data_home = temp.path().join("data");
+    fs::create_dir_all(&root).expect("create corpus");
+    write_file(&root.join("notes.rs"), "pub fn lexical_only_path() {}\n");
+
+    run_success_with_homes(
+        &[
+            "setup",
+            root.to_str().expect("root path"),
+            "--name",
+            "lexical",
+            "--no-embed",
+        ],
+        &config_home,
+        &data_home,
+    );
+
+    let find_stdout = run_success_with_homes(
+        &["find", "lexical_only_path", "--corpus", "lexical", "--json"],
+        &config_home,
+        &data_home,
+    );
+    let hits: Value = serde_json::from_str(&find_stdout).expect("parse find json");
+    assert_eq!(hits[0]["source_path"], "notes.rs");
+    assert!(
+        !data_home.join("corpora/models").exists(),
+        "setup --no-embed plus default find must not create a model cache"
+    );
+}
+
+#[test]
 fn index_find_and_retrieve_work_end_to_end() {
     let temp = TempDir::new().expect("tempdir");
     let root = temp.path().join("corpus");
