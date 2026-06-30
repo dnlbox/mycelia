@@ -10,6 +10,29 @@ The thesis is simple: consult a sourced index instead of re-reading files.
 the caller commits to a chunk. The project is local-first, precision-first, and
 licensed as FOSS under Apache-2.0.
 
+## Project status: shelved (2026-06-30)
+
+This project is stopped and kept as a record of what was learned. During a later
+effort (the `v1` branch) the thesis above was sharpened: Mycelia as a token-saving
+retrieval primitive (`find` + `retrieve`) that an existing CI or AI-SDK agent calls
+instead of navigating code with grep and read. The customer was the already-built
+agent; the promise was "same job, fewer tokens."
+
+That reframed thesis did not reach the gains it needed. Measured end to end on a
+real repository, with a real model-backed agent on both arms, an agent using
+Mycelia consumed roughly 2.4x MORE tokens for code navigation than the same agent
+using grep plus targeted reads (it lost on every task and converged less
+reliably). A precomputed index did not beat agentic grep on a small or medium
+repository, which matches the prior research that a model driving ripgrep is
+already near-optimal for this task. Earlier "90 percent token savings" numbers
+turned out to be measured against a synthetic worst-case baseline, not a real
+agent (see the lessons below).
+
+The Rust engine is sound; the positioning is what failed. The full reasoning,
+numbers, and methodology lessons are in [lessons-learned/](lessons-learned/). The
+shelved v1 effort lives on the `v1` branch. Everything below describes the engine
+as it was built, for reference.
+
 ## Current status
 
 The shipped baseline includes:
