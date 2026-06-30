@@ -5,8 +5,8 @@ Working memory for the looping build agent. **Read first, update last, every sli
 ## Position
 
 - **Phase:** 4 — The proof (PR-review bakeoff, ship gate)
-- **Slice:** Phase 4 / Slice 2 (candelabrum-studio bakeoff runner & workflow)
-- **Status:** GO/NO-GO 4 AWAITING LEAD REVIEW & SCORED BAKEOFF RUN. Antigravity builder tasks (items 2, 3, 4) complete: baseline arm wired, models parameterized, bakeoff script & workflow shipped, harness dry-run validated against 6 lead-verified oracle cases on cloned candelabrum-studio. Ready for lead to execute scored Sonnet run and review gate evidence.
+- **Slice:** Phase 4 / Slice 2 reviewed → harness REWORK required before any scored run
+- **Status:** GO/NO-GO 4 = NO-GO (lead-reviewed 2026-06-29). The bakeoff harness does not measure the gate's decision-rule metrics (no tokens, no false positives, recall=keyword-presence). Scored Sonnet run NOT executed — would burn budget on an invalid instrument. Rework spec in GO/NO-GO 4 evidence.
 - **Tree:** green (2026-06-29: 99 core + 28 CLI-unit + 33 CLI integration, 0 fail)
 
 ## Next up
@@ -31,7 +31,7 @@ Residual (a) AI Gateway routing is CLOSED (verified with shipped agent). This ph
 - [x] **GO/NO-GO 0** — determinism + measurement baseline (**GREEN — lead-reviewed 2026-06-29**)
 - [x] **GO/NO-GO 1** — per-commit index + CI artifact (**GREEN — lead-reviewed 2026-06-29**)
 - [x] **GO/NO-GO 2** — change-scoped retrieval (**GREEN — lead-reviewed 2026-06-29**)
-- [ ] **GO/NO-GO 4** — SHIP (**AWAITING LEAD REVIEW & SCORED BAKEOFF RUN**)
+- [ ] **GO/NO-GO 4** — SHIP (**NO-GO — lead-reviewed 2026-06-29; harness rework required**)
 
 ## GO/NO-GO 3 evidence
 
@@ -71,6 +71,13 @@ Residual (a) AI Gateway routing is CLOSED (verified with shipped agent). This ph
 ## GO/NO-GO 4 evidence
 
 - **Antigravity Harness Validation (2026-06-29):** Built `benchmark/run-bakeoff.mjs` running paired A/B evaluation (Mycelia vs baseline `grep/read`) over all 6 frozen cross-file correctness cases in `benchmark/candelabrum-oracle.md` against cloned `github.com/earlgreylabs/candelabrum-studio`. Shipped `.github/workflows/candelabrum-bakeoff.yml` workflow for manual execution and artifact collection. Dry-run harness validation confirmed Mycelia index preparation (`mycelia ci prepare --no-embed`) and verified all target changed paths across C1–C6 for both arms. Ready for lead execution of live scored run (`anthropic/claude-sonnet-4-5`) and gate review.
+
+- **LEAD REVIEW 2026-06-29 → GO/NO-GO 4 = NO-GO.** Reviewed `benchmark/run-bakeoff.mjs` before spending budget. The harness does NOT measure the gate's decision rule and would yield meaningless numbers:
+  1. **No token measurement (the #1 metric).** It records `elapsed_ms` (wall time), not tokens; `review-agent.mjs` only prints review text, never `result.usage`. "≥25% token reduction" is unmeasured.
+  2. **No false-positive measurement.** Only a hit_rate is computed; nothing counts findings raised that are NOT in the oracle. "Measurable FP improvement" cannot be evaluated.
+  3. **Recall = keyword presence, not finding detection.** `hit_rate = any(expected_keywords in stdout)` with generic keywords (e.g. C5 = ['style','caption']); a review that merely mentions the topic — even "No correctness issues found" — scores 1.0. Both arms hit ~1.0 → zero discriminative power.
+  Net: did NOT run the scored bakeoff; the instrument is invalid.
+  **Required rework (Antigravity, harness):** (a) emit per-run token usage from `agent.generate()` (`result.usage`) in a bench/structured output mode and aggregate Mycelia vs baseline → reduction %; (b) add each oracle case's `expected_finding` text and score RECALL = did the arm identify THAT finding (not keyword presence); (c) score FALSE POSITIVES = correctness claims the arm raised that match no oracle finding; (d) emit a per-case + aggregate three-metric report plus the decision-rule check. **Scoring credibility (one-time ship gate):** automate token capture, but have the LEAD manually judge recall + FP by reading the 6×2 reviews against the frozen oracle (avoids LLM-judge circularity), or use an LLM judge WITH lead spot-check. Re-request GO/NO-GO 4 once the harness measures the three real metrics.
 
 ## Done log (append-only, terse — newest last)
 
