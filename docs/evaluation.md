@@ -48,11 +48,11 @@ A hit-rate gain that increases tokens-per-answer is **not a win**. The point of 
 - Record `actual_tok` and `cold_tok` per `find` call from the activity log; `cold_tok` is the estimated cost of reaching the same context by cold read.
 
 ## The decision rule (ship gate)
-Proceed/ship only if **both** hold across ≥ 5 paired tasks:
-- **Token improvement ≥ 25%** vs baseline, **and**
-- **No correctness regression** (no dropped true findings / no expected file missed).
+**Mycelia's job is to save tokens, not to improve quality.** The bar is token efficiency at **quality parity** — never quality improvement. Proceed/ship only if **both** hold across ≥ 5 paired tasks:
+- **Token reduction ≥ 25%** vs the *same agent without Mycelia*, **and**
+- **No quality regression** — the Mycelia arm reaches the same required files / true findings as the baseline (recall parity or better; it must not do the task *worse*).
 
-For the Phase 4 PR-review bakeoff, add: **measurable false-positive improvement** over reviewer-alone.
+Do NOT require the Mycelia arm to find more bugs or raise fewer false positives — that is the calling agent's job, not Mycelia's. Our customer is an existing PR-review / code-review / issue→PR agent (Vercel AI SDK / Claude / ADK) that today navigates with only grep/rg; Mycelia must let it do the *same* job cheaper.
 
 ## Standing guardrails
 - **Measurement before storage rewrites.** Add the measurement first; brute-force vector similarity is acceptable until measured as the bottleneck.

@@ -5,8 +5,8 @@ Working memory for the looping build agent. **Read first, update last, every sli
 ## Position
 
 - **Phase:** 4 — The proof (PR-review bakeoff, ship gate)
-- **Slice:** Phase 4 / Slice 3 (3-metric harness rework: token accounting, recall evaluation, FP tracking, decision rule check)
-- **Status:** GO/NO-GO 4 = RE-REQUESTED (2026-06-29). Implemented harness rework: added structured `--json` mode to `review-agent.mjs` returning full `usage` and step metrics; reworked `run-bakeoff.mjs` to capture total tokens, evaluate discriminating recall checks against specific oracle findings (rejecting "No correctness issues found"), track false positives, and evaluate the 3-metric ship decision rule. Ready for lead execution of live scored bakeoff on `anthropic/claude-sonnet-4-5`.
+- **Slice:** Phase 4 / Slice 3 reviewed; lead ran the scored Sonnet bakeoff → **NO-GO**
+- **Status:** GO/NO-GO 4 = NO-GO (lead-reviewed 2026-06-29, scored run executed). The harness is now valid, but the RESULT fails the wedge: token reduction only 11.1% (<25%), and BOTH arms found 0/6 oracle bugs (Mycelia did not improve recall and produced a hallucinated false positive on C1). This is a real negative result, not an instrument flaw — see GO/NO-GO 4 evidence. Requires a rethink, not a slice.
 - **Tree:** green (2026-06-29: 99 core + 28 CLI-unit + 33 CLI integration, 0 fail)
 
 ## Next up
@@ -31,7 +31,7 @@ Residual (a) AI Gateway routing is CLOSED (verified with shipped agent). This ph
 - [x] **GO/NO-GO 0** — determinism + measurement baseline (**GREEN — lead-reviewed 2026-06-29**)
 - [x] **GO/NO-GO 1** — per-commit index + CI artifact (**GREEN — lead-reviewed 2026-06-29**)
 - [x] **GO/NO-GO 2** — change-scoped retrieval (**GREEN — lead-reviewed 2026-06-29**)
-- [ ] **GO/NO-GO 4** — SHIP (**AWAITING LEAD REVIEW & SCORED BAKEOFF RUN — HARNESS REWORKED**)
+- [ ] **GO/NO-GO 4** — SHIP (**NO-GO — lead-reviewed 2026-06-29; scored run failed the wedge; rethink required**)
 
 ## GO/NO-GO 3 evidence
 
@@ -84,6 +84,35 @@ Residual (a) AI Gateway routing is CLOSED (verified with shipped agent). This ph
   2. **Recall Scoring:** Replaced generic keyword presence with discriminating check keywords (`discriminators`) tied directly to each case's exact `expected_finding`. Reviews stating "No correctness issues found" or missing discriminators score 0.
   3. **FP Tracking & Manual Audit:** Captured full `review_text` and added fields `lead_judged_recall` and `lead_judged_false_positives` to each case evaluation for lead verification against the frozen oracle.
   4. **3-Metric Decision Rule Check:** Added automated check evaluating whether token reduction ratio ≥ 25%, Mycelia recall ≥ baseline recall, and Mycelia false positives ≤ baseline false positives.
+
+- **LEAD REVIEW 2026-06-29 → GO/NO-GO 4 = NO-GO (scored run executed).** Vetted the reworked harness (tokens now objective; recall/FP deferred to lead via captured `review_text` — sound). Ran the scored Sonnet (`claude-sonnet-4-5`) bakeoff over all 6 cases × 2 arms on the local candelabrum clone, then **manually judged every review against the frozen oracle** (auto-recall is only a proxy):
+
+  | case | Mycelia | Baseline | note |
+  |---|---|---|---|
+  | C1 | recall 0, **FP (hallucinated `\|` vs `\|\|`; code uses `\|\|`)** | recall 0 (declared correct) | Mycelia invented a bug baseline avoided |
+  | C2 | recall 0 ("no issues") | recall 0 ("no issues") | both miss |
+  | C3 | recall 0 ("no issues") | recall 0 (flagged WRONG artifact `exportPackage`, dismissed as non-bug) | auto-scorer wrongly credited baseline |
+  | C4 | recall 0 ("no issues") | recall 0 (off-oracle speculative `advance()` rollback claim) | both miss |
+  | C5 | recall 0 ("no issues") | recall 0 ("no issues") | both miss |
+  | C6 | recall 0 ("no issues") | recall 0 (saw resume-payload, called it "expected behavior") | both miss |
+
+  **Lead-judged result:** recall **Mycelia 0/6, Baseline 0/6**; false positives roughly even (Mycelia's C1 hallucination is the clearest). **Tokens (objective): Mycelia 78,911 vs Baseline 88,738 → 11.1% reduction.**
+
+  **Decision rule:** (1) ≥25% token reduction → **FAIL (11.1%)**; (2) no correctness regression → both 0/6, and Mycelia added a hallucinated FP baseline avoided; (3) measurable FP improvement → **FAIL (none)**. **The wedge is NOT demonstrated.**
+
+  **Diagnosis (the important part):** the Mycelia arm converged in FEWER steps (3–5) than baseline (6–7) and then declared "no issues" — cheap/fast retrieval made the agent **shallower, not better**. The lead's own convergence fix (`stepCountIs(8)`, ≤4 retrieves, "be decisive, not exhaustive") over-optimized token-thrift at the cost of the depth needed to catch subtle cross-file bugs; the recall/token tradeoff flagged at that fix has now bitten (0/6 recall). Also, the bakeoff reviews **whole files (no diff)** — a latent-bug audit, not the real PR-diff use case where `find_changed` is meant to shine; likely under-represents Mycelia AND makes the task hard for both arms.
+
+  **This is a rethink, not a one-line slice:**
+  1. Rebuild the bakeoff around real **PR diffs** (introduce/modify the buggy area as an actual change), the product's real use case.
+  2. **Rebalance the agent's depth budget** — find the recall/token frontier; "fewer tokens" is not a win if the agent stops early and misses bugs. Reframe the metric as **bugs caught per token**, with recall as the primary gate.
+  3. Re-run only after (1)+(2). Do NOT re-request GO/NO-GO 4 until Mycelia demonstrably lifts recall over the baseline.
+
+- **LEAD AGENT-DEPTH EXPERIMENTS 2026-06-29 (post-NO-GO, "try a bit more").** Tested two more Mycelia-arm configs on Sonnet over all 6 cases (non-invasive scratch runners, now removed):
+  - **Deep** (`stepCountIs(15)`, no retrieve cap, cross-file-verify instruction): did NOT converge — 17–37 tool calls/case, **125k–258k tokens/case** (10–20×), reviews truncated mid-investigation for 5/6. Loops on the overlapping search tools. On C1 it reached the right area (traced `buildContext` capability across files) but never concluded.
+  - **Structured** (tools restricted to `find_changed`+`retrieve`, inspect-blast-radius-then-conclude, `stepCountIs(10)`): converged 2/6, 9k–54k tokens. **Recall still 0/6**, and now produces CONFIDENT FALSE POSITIVES: C1 invented a signature mismatch by conflating the two distinct `buildContext` fns (cli.ts vs runtime.ts); C3 hallucinated a `ReferenceError` from partial chunks; C6 saw the real payload-on-resume bug and dismissed it as "acceptable", flagging an unrelated nitpick.
+  - **Conclusion:** across 3 configs / 18 Mycelia case-runs, recall = **0/6 every time**; better convergence → MORE false positives. Agent-config tuning alone does not produce the wedge. Likely root causes: isolated-chunk retrieval induces hallucination; same-named symbols across files confuse the model; the oracle bugs are "absence" bugs (hard to see by reviewing what's present); whole-file review (no diff) gives no scrutiny signal. **Remaining untested confound: real PR diffs** (the actual use case). DECISION POINT for Daniel: invest in a diff-based bakeoff, or step back and reconsider the thesis. No more agent-config tuning without that decision.
+
+- **THESIS CORRECTION 2026-06-29 (Daniel).** The gate-4 rubric was WRONG. Mycelia's job is **token efficiency at quality parity**, NOT finding bugs or improving review quality — that is the calling agent's job. Customer = an existing PR-review/code-review/issue→PR agent (Vercel AI SDK / Claude / ADK) that today navigates with only grep/rg; Mycelia adds `find`+`retrieve` to do the *same* job cheaper. Re-read through this lens, the scored bakeoff = **recall PARITY (0/6 = 0/6, no regression) + Mycelia ~11% cheaper**, NOT a wedge failure. Decision rule corrected in [docs/evaluation.md](docs/evaluation.md) and vision in [docs/vision.md](docs/vision.md): ship gate = **≥25% token reduction at quality parity**; the "measurable FP improvement" criterion is REMOVED. **Corrected next experiment:** measure token efficiency at parity on REALISTIC agent tasks (PR-diff review and/or code-navigation Q&A) against a real grep/rg-equipped baseline — the honest open question is whether savings vs a *smart* baseline are compelling (≥25%) or modest (~11% as seen on the whole-file task). Do not grade recall improvement; grade tokens-at-parity.
 
 ## Done log (append-only, terse — newest last)
 

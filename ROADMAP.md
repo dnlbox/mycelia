@@ -91,10 +91,10 @@ _The bakeoff that makes the positioning credible instead of asserted._
 
 **GO/NO-GO 4 (SHIP):**
 
-- [ ] ≥ 25% token reduction vs the no-Mycelia baseline.
-- [ ] No correctness regression (no dropped true findings).
-- [ ] Measurable false-positive improvement.
-- [ ] Both conditions hold across **≥ 5 paired tasks** (the decision rule).
+- [ ] ≥ 25% token reduction vs the **same agent without Mycelia**.
+- [ ] No quality regression — Mycelia arm reaches the same required files / true findings as the baseline (recall parity or better).
+- [ ] Holds across **≥ 5 paired tasks**.
+- Note: Mycelia's job is **token efficiency at parity**, NOT finding more bugs or fewer false positives (that is the calling agent's job). See [docs/evaluation.md](docs/evaluation.md).
 - **If GREEN:** cut v1, publish the benchmark and the two integration recipes. **If not:** the failing metric names the next slice; loop back.
 
 ---

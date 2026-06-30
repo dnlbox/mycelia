@@ -50,11 +50,11 @@ The market converged on "persistent tree-sitter knowledge-graph MCP server for y
 2. **Library-shaped — consumed by a developer-written agent.** Built to be *called by code you wrote* with the AI SDK, not plugged into a desktop IDE assistant or rented as hosted memory.
 3. **CI-native ephemerality.** Cached-incremental, keyed on tree hash; a Rust indexer makes warm-cache rebuilds seconds. Lexical-only path runs with no model download.
 
-## The lead use case: be the lever, not the surface
+## The job: save tokens, not find bugs
 
-PR review's binding constraint is **false-positive noise**, and its root cause is retrieval quality, not the model. Top reviewers cluster at F1 51–60%; trust collapses past ~20% noise. Every leader rebuilt the retrieval layer independently and none wants to own it — Greptile already proves the rental model exists.
+Mycelia does not improve review quality or find bugs — that is the **calling agent's** job. Mycelia makes that agent **cheaper**. Today, PR-review / code-review / issue→PR agents (built on the Vercel AI SDK, Claude, ADK, etc.) navigate code with only `grep` / `rg` / read, burning 30–50% of their context on navigation. Mycelia gives them `find` + `retrieve` so they reach the **same** context at far fewer tokens.
 
-So Mycelia ships the **retrieval primitive**, not another reviewer. The proof is a measurable bakeoff: *"reviewer-X + Mycelia beats reviewer-X alone on false-positive rate and token cost."* Land on the composable/open end (PR-Agent, Claude Code Action, home-grown CI agents); avoid head-to-head with closed end-to-end products.
+Our customer is **that already-built agent**, not the end user, and not a reviewer we ship. The proof is a measurable bakeoff: *"the same agent + Mycelia completes the same task at materially fewer tokens, with no quality regression"* — token efficiency at parity, not quality improvement. Land on the composable/open end (PR-Agent, Claude Code Action, home-grown CI agents).
 
 ## Explicitly out of scope for v1
 
