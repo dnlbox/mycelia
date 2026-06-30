@@ -16,9 +16,11 @@ const model = process.env.AI_GATEWAY_MODEL ?? 'anthropic/claude-haiku-4-5';
 const changedPathFile = process.env.MYCELIA_CHANGED_PATHS;
 const disableMycelia = process.env.MYCELIA_DISABLE === '1' || process.env.MYCELIA_DISABLE === 'true';
 
+const outputJson = process.argv.includes('--json') || process.env.MYCELIA_OUTPUT_JSON === '1';
+
 const changedPaths = changedPathFile
   ? (await readFile(changedPathFile, 'utf8')).split(/\r?\n/).filter(Boolean)
-  : process.argv.slice(2);
+  : process.argv.slice(2).filter((arg) => arg !== '--json');
 
 if (changedPaths.length === 0) {
   throw new Error(
@@ -123,7 +125,7 @@ try {
     instructions,
   });
 
-  const { text } = await agent.generate({
+  const result = await agent.generate({
     prompt: [
       disableMycelia
         ? 'Review this pull request using available tools for code context.'
@@ -134,7 +136,17 @@ try {
     ].join('\n'),
   });
 
-  console.log(text);
+  if (outputJson) {
+    console.log(
+      JSON.stringify({
+        text: result.text || '',
+        usage: result.usage || { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        stepsCount: Array.isArray(result.steps) ? result.steps.length : 0,
+      }),
+    );
+  } else {
+    console.log(result.text);
+  }
 } finally {
   if (mcpClient) {
     await mcpClient.close();

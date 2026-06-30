@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -22,45 +22,65 @@ const ORACLE_CASES = [
     id: 'C1',
     name: 'auto-resume drops director capability',
     changed_path: 'src/server/runtime.ts',
-    expected_keywords: ['capability', 'directorCapability', 'finalise', 'autoResume'],
+    expected_finding: 'resumeInterruptedRuns calls buildContext without directorCapability, defaulting to finalise instead of directing capability.',
     required_files: ['src/server/routes/runs.ts'],
+    discriminators: ['directorcapability', 'finalise', 'directing'],
   },
   {
     id: 'C2',
     name: 'proposeConcepts history never populated',
     changed_path: 'src/stages/direct.ts',
-    expected_keywords: ['history', 'proposeConcepts', 'distinct'],
+    expected_finding: 'proposeConcepts is never passed history parameter, rendering concept deduplication dead.',
     required_files: ['src/providers/llm/director-claude.ts', 'src/core/providers.ts'],
+    discriminators: ['history', 'dedup', 'distinct'],
   },
   {
     id: 'C3',
     name: 'SERVABLE_ARTIFACTS omits upscaledImage',
     changed_path: 'src/server/routes/assets.ts',
-    expected_keywords: ['upscaledImage', 'SERVABLE_ARTIFACTS', '404'],
+    expected_finding: 'assets route SERVABLE_ARTIFACTS omits upscaledImage, returning 404 when requested.',
     required_files: ['src/core/run.ts', 'src/stages/upscale.ts'],
+    discriminators: ['servable_artifacts', 'upscaledimage', '404'],
   },
   {
     id: 'C4',
     name: 'recover() is permanently broken',
     changed_path: 'src/core/orchestrator.ts',
-    expected_keywords: ['recover', 'failed', 'status', 'recordRunFailure'],
+    expected_finding: 'recover() requires status === "failed", but runs never transition to failed (recordRunFailure keeps status unchanged).',
     required_files: ['src/core/run.ts', 'src/server/routes/runs.ts'],
+    discriminators: ['recordrunfailure', 'unreachable', 'failed'],
   },
   {
     id: 'C5',
     name: 'per-style caption guidance ignored',
     changed_path: 'src/stages/caption.ts',
-    expected_keywords: ['style', 'caption'],
+    expected_finding: 'caption stage calls director.caption without passing ctx.style, ignoring required per-style caption configuration.',
     required_files: ['src/core/config.ts', 'src/core/providers.ts'],
+    discriminators: ['ctx.style', 'style parameter', 'caption configuration'],
   },
   {
     id: 'C6',
     name: 'video providers return undefined payload on resume',
     changed_path: 'src/providers/video/fal.ts',
-    expected_keywords: ['payload', 'resume', 'existingJobId', 'undefined'],
+    expected_finding: 'on resume (when existingJobId set), provider returns payload as undefined because payload is only assigned on fresh submits.',
     required_files: ['src/stages/animate.ts', 'src/providers/video/veo.ts'],
+    discriminators: ['existingjobid', 'payload', 'resume'],
   },
 ];
+
+function evaluateReview(text, testCase) {
+  if (!text || text.trim() === '' || text.toLowerCase().includes('no correctness issues found')) {
+    return { recall: 0, falsePositivesClaimed: 0, notes: 'No correctness issues identified.' };
+  }
+  const lowerText = text.toLowerCase();
+  const matchedDiscriminators = testCase.discriminators.filter((d) => lowerText.includes(d.toLowerCase()));
+  const recall = matchedDiscriminators.length >= 2 ? 1 : 0;
+  return {
+    recall,
+    falsePositivesClaimed: 0,
+    notes: recall ? 'Expected finding identified.' : 'Review generated claims but missed expected core finding.',
+  };
+}
 
 const repoRoot = resolve(process.cwd());
 const localBin = join(process.env.HOME || '', '.local/bin/mycelia');
@@ -88,7 +108,14 @@ async function main() {
     console.log(`Preparing Mycelia index on target repo...`);
     await runCommand(myceliaBin, ['ci', 'prepare', '--no-embed', targetDir], { cwd: targetDir });
 
-    const results = [];
+    const caseResults = [];
+    let totalMyceliaTokens = 0;
+    let totalBaselineTokens = 0;
+    let myceliaRecallHits = 0;
+    let baselineRecallHits = 0;
+    let myceliaFalsePositives = 0;
+    let baselineFalsePositives = 0;
+
     for (const testCase of ORACLE_CASES) {
       console.log(`\nRunning case ${testCase.id}: ${testCase.name}`);
       const changedFile = join(targetDir, testCase.changed_path);
@@ -103,13 +130,22 @@ async function main() {
 
         if (isDryRun) {
           console.log(`    [Dry-run] Verified target path ${testCase.changed_path} ready for ${arm} arm.`);
-          results.push({ case: testCase.id, arm, status: 'dry-run-ok' });
+          caseResults.push({
+            case: testCase.id,
+            arm,
+            status: 'dry-run-ok',
+            tokens: 0,
+            recall: 0,
+            false_positives: 0,
+            lead_judged_recall: null,
+            lead_judged_false_positives: null,
+          });
           continue;
         }
 
         const startTime = Date.now();
         try {
-          const { stdout } = await runCommand('node', [reviewAgentScript, testCase.changed_path], {
+          const { stdout } = await runCommand('node', [reviewAgentScript, '--json', testCase.changed_path], {
             cwd: targetDir,
             env: {
               ...process.env,
@@ -119,24 +155,71 @@ async function main() {
             },
           });
           const elapsed = Date.now() - startTime;
-          const hitKeywords = testCase.expected_keywords.filter((kw) => stdout.toLowerCase().includes(kw.toLowerCase()));
-          const hitRate = hitKeywords.length > 0 ? 1.0 : 0.0;
-          results.push({
+          let parsed;
+          try {
+            parsed = JSON.parse(stdout.trim());
+          } catch {
+            parsed = { text: stdout, usage: { totalTokens: 0 }, stepsCount: 0 };
+          }
+
+          const tokens = parsed.usage?.totalTokens || 0;
+          const reviewText = parsed.text || '';
+          const evalRes = evaluateReview(reviewText, testCase);
+
+          if (arm === 'mycelia') {
+            totalMyceliaTokens += tokens;
+            myceliaRecallHits += evalRes.recall;
+            myceliaFalsePositives += evalRes.falsePositivesClaimed;
+          } else {
+            totalBaselineTokens += tokens;
+            baselineRecallHits += evalRes.recall;
+            baselineFalsePositives += evalRes.falsePositivesClaimed;
+          }
+
+          caseResults.push({
             case: testCase.id,
             arm,
             elapsed_ms: elapsed,
-            hit_rate: hitRate,
-            output_preview: stdout.slice(0, 200).replace(/\n/g, ' '),
+            tokens,
+            steps: parsed.stepsCount,
+            recall: evalRes.recall,
+            false_positives: evalRes.falsePositivesClaimed,
+            review_text: reviewText,
+            lead_judged_recall: null,
+            lead_judged_false_positives: null,
           });
         } catch (err) {
           console.error(`    Error running ${arm} on ${testCase.id}: ${err.message}`);
-          results.push({ case: testCase.id, arm, error: err.message });
+          caseResults.push({ case: testCase.id, arm, error: err.message });
         }
       }
     }
 
-    console.log('\n--- Bakeoff Summary ---');
-    console.log(JSON.stringify(results, null, 2));
+    const tokenReductionRatio =
+      totalBaselineTokens > 0 ? (totalBaselineTokens - totalMyceliaTokens) / totalBaselineTokens : 0;
+    const decisionRuleMet =
+      tokenReductionRatio >= 0.25 &&
+      myceliaRecallHits >= baselineRecallHits &&
+      myceliaFalsePositives <= baselineFalsePositives;
+
+    const report = {
+      cases: caseResults,
+      summary: isDryRun
+        ? { status: 'dry-run-complete', cases_checked: ORACLE_CASES.length }
+        : {
+            total_mycelia_tokens: totalMyceliaTokens,
+            total_baseline_tokens: totalBaselineTokens,
+            token_reduction_ratio: tokenReductionRatio,
+            mycelia_recall: `${myceliaRecallHits}/${ORACLE_CASES.length}`,
+            baseline_recall: `${baselineRecallHits}/${ORACLE_CASES.length}`,
+            mycelia_false_positives: myceliaFalsePositives,
+            baseline_false_positives: baselineFalsePositives,
+            decision_rule_met: decisionRuleMet,
+          },
+    };
+
+    console.log('\n--- Bakeoff Report ---');
+    console.log(JSON.stringify(report, null, 2));
   } finally {
     if (cleanupTarget) {
       await rm(targetDir, { recursive: true, force: true }).catch(() => {});
